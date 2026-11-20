@@ -1,0 +1,174 @@
+# square² daily cross-family review (advisory: findings become issues, nothing blocks).
+# Enable with the repository variable SQ2_REVIEW_ENABLED=true.
+# A manual dispatch runs even while it is disabled (for the pilot); the schedule needs the variable.
+# The reviewed branch is `branch:` in .square2/config.yaml (the schedule itself fires on the default branch).
+# Variables: SQ2_AZURE_OPENAI_ENDPOINT (https://<resource>.openai.azure.com/), SQ2_REVIEW_MODEL,
+# SQ2_REVIEW_FALLBACK_MODEL (optional). Secret: SQ2_AZURE_OPENAI_API_KEY (analyze job only).
+#
+# Trust split: prepare and publish run with repository content and an issues token;
+# analyze runs the model with no checkout, no GitHub token (permissions: {}) and only the LLM key.
+name: square2-review
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'Optional: review from this commit (exclusive); needs `to`. An explicit range never moves the state.'
+        type: string
+        required: false
+      to:
+        description: 'Optional: review up to this commit (inclusive); needs `from`'
+        type: string
+        required: false
+
+permissions: {}
+
+# One review at a time, never cancelled: the review is the only writer of the state issue's body
+# (last reviewed commit), re-read right before each write and moved forward only.
+concurrency:
+  group: square2-review-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch' || vars.SQ2_REVIEW_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      skip: ${{ steps.prepare.outputs.skip }}
+      branch: ${{ steps.branch.outputs.branch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      # The branch under review comes from .square2/config.yaml, not from the ref the schedule fired on.
+      - name: reviewed branch
+        id: branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          branch="$(node tools/square2/bin/square2.mjs config get branch || true)"
+          [ -n "$branch" ] || branch="$DEFAULT_BRANCH"
+          if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
+            echo "::error::branch '$branch' from .square2/config.yaml is not a valid branch name"
+            exit 1
+          fi
+          git checkout --quiet --detach "refs/remotes/origin/$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+      - name: square2 review prepare
+        id: prepare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+        run: |
+          set -- review prepare --branch "$BRANCH" --out square2-review
+          if [ -n "$FROM" ] && [ -n "$TO" ]; then
+            set -- "$@" --from "$FROM" --to "$TO"
+          elif [ -n "$FROM" ] || [ -n "$TO" ]; then
+            echo "::error::the inputs from and to go together: give both for an explicit range, or neither"
+            exit 1
+          fi
+          node tools/square2/bin/square2.mjs "$@"
+          skip="$(node -e 'const c = JSON.parse(require("fs").readFileSync("square2-review/context.json", "utf8")); process.stdout.write(String(c.skip === true || !c.range || c.range.from_sha === c.range.to_sha))')"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+      # The vendored runner travels with the context: analyze has no checkout.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: square2-review
+          path: |
+            square2-review/
+            tools/square2/
+          if-no-files-found: error
+          retention-days: 3
+
+  analyze:
+    needs: prepare
+    if: needs.prepare.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions: {}
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: square2-review
+      - name: install codex (pinned)
+        run: npm install --global --ignore-scripts @openai/codex@0.171.0
+      - name: square2 review guard-env
+        run: node tools/square2/bin/square2.mjs review guard-env
+      - name: square2 review run
+        env:
+          SQ2_AZURE_OPENAI_ENDPOINT: ${{ vars.SQ2_AZURE_OPENAI_ENDPOINT }}
+          SQ2_AZURE_OPENAI_API_KEY: ${{ secrets.SQ2_AZURE_OPENAI_API_KEY }}
+          SQ2_REVIEW_MODEL: ${{ vars.SQ2_REVIEW_MODEL }}
+          SQ2_REVIEW_FALLBACK_MODEL: ${{ vars.SQ2_REVIEW_FALLBACK_MODEL }}
+        run: node tools/square2/bin/square2.mjs review run --context square2-review --out square2-analysis
+      # Only the analysis files publish trusts (one result file per call for a heavy range).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: square2-analysis
+          path: |
+            square2-analysis/result.json
+            square2-analysis/result.call-*.json
+            square2-analysis/resolutions.json
+            square2-analysis/candidates.json
+            square2-analysis/usage.json
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: [prepare, analyze]
+    # also on a skip: publish is then a no-op, and the budget check still runs daily
+    if: >-
+      always() && needs.prepare.result == 'success'
+      && (needs.prepare.outputs.skip == 'true' || needs.analyze.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      # The context comes from prepare (trusted), never from analyze; publish runs its own checkout's runner.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: square2-review
+          path: prepared
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.prepare.outputs.skip == 'false'
+        with:
+          name: square2-analysis
+          path: square2-analysis
+      - name: square2 review publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tools/square2/bin/square2.mjs review publish --context prepared/square2-review --analysis square2-analysis
+      - name: square2 budget
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tools/square2/bin/square2.mjs budget

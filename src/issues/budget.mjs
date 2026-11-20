@@ -34,8 +34,13 @@ export function billedMinutes(start, end) {
   return Math.ceil(ms / 60000);
 }
 
-/** Jobs per run of the default workflows (the gate has one job, the review three). */
-export const DEFAULT_JOBS = Object.freeze({ 'square2-gate.yml': 1, 'square2-review.yml': 3 });
+/**
+ * Jobs per run, by workflow file, unless `budget.jobs` says otherwise: 1.
+ * The square² workflows run their jobs one after another, so a run's wall
+ * time (updated_at - run_started_at) is about its billed time. A workflow
+ * whose jobs run in parallel should set its job count.
+ */
+export const DEFAULT_JOBS = Object.freeze({});
 
 /**
  * Workflow file name of a run (`.github/workflows/<name>`, an `@ref` suffix ignored).
@@ -72,7 +77,7 @@ export async function monthToDateMinutes(a) {
 
 /**
  * Budget settings from config `budget: {monthly_minutes, workflows, jobs}`
- * (`jobs`: jobs per run by workflow file; defaults gate 1, review 3, else 1).
+ * (`jobs`: jobs that run in parallel per run, by workflow file; default 1).
  * @param {Record<string, unknown>} raw
  * @returns {{ monthly: number, workflows: string[], jobs: Record<string, number> }}
  */

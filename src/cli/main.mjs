@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -22,8 +22,9 @@ import { formatDiagnostic } from '../core/violation.mjs';
 import { GitError, runGit, topLevel } from '../git/exec.mjs';
 import { blobAt, blobText, resolveBase } from '../git/show.mjs';
 import { runRules, selftest } from './engines.mjs';
-import { globalExcludes, loadRepo, readOptional, selectRules } from './load.mjs';
-import { ReplayError, replayCommit, replaySince } from './replay.mjs';
+import { globalExcludes, loadRepo, readLock, readOptional, selectRules, vendorPath } from './load.mjs';
+import { parseConfig } from './config.mjs';
+import { ReplayError, replayCommit, replaySince, withTemporaryWorktree } from './replay.mjs';
 import { VendorError, vendor, verifyVendor } from './vendor.mjs';
 import { budgetCommand, publishGateCommand } from './publish-cmd.mjs';
 import { reviewCommand } from './review-cmd.mjs';
@@ -34,8 +35,10 @@ export const USAGE = `square² (方方) ${VERSION}
 Usage: square2 <command> [options]
 
 Commands:
-  check [--only <ids>] [--format text|github] [--report <path>] [--base <sha>]
-                         self-test, then gate the repository (exit 0 pass, 1 violations, 2 cannot run)
+  check [--only <ids>] [--format text|github] [--report <path>] [--base <sha>] [--rev <sha>]
+                         self-test, then gate the repository (exit 0 pass, 1 violations, 2 cannot run);
+                         --rev: gate that commit's tree in a temporary worktree; --report: write the JSON report
+  config get <key>       print one scalar of .square2/config.yaml (exit 1 when unset)
   selftest [--only <ids>]
                          every enabled rule must fire on .square2/fixtures/<id>/bad/
   baseline show          print baseline counts per rule
@@ -93,6 +96,7 @@ const OPTIONS = /** @type {const} */ ({
   format: { type: 'string' },
   report: { type: 'string' },
   base: { type: 'string' },
+  rev: { type: 'string' },
   approval: { type: 'string' },
   from: { type: 'string' },
   ref: { type: 'string' },
@@ -157,15 +161,32 @@ export async function main(argv, io) {
 
     if (command === 'vendor') {
       if (!values.from || !values.ref) throw new UsageError('vendor needs --from and --ref');
-      const res = await vendor({ repo: { root: repoRoot, dir }, cwd: io.cwd, from: values.from, ref: values.ref, into: values.into });
+      const res = await vendor({ repo: { root: repoRoot, dir: join(repoRoot, '.square2') }, cwd: io.cwd, from: values.from, ref: values.ref, into: values.into });
       out(res.lines);
       return 0;
     }
 
-    const tamper = verifyVendor({ root: repoRoot, dir }, toolRoot);
+    if (command === 'check' && typeof values.rev === 'string') return await checkAtRev({ argv, io, repoRoot, rev: values.rev, out });
+
+    // the lock always lives at <root>/.square2, whatever SQUARE2_DIR points the catalogue at
+    const tamper = verifyVendor({ root: repoRoot, dir: join(repoRoot, '.square2') }, toolRoot);
     if (tamper.status === 'tampered') {
       out([tamper.line]);
       return 2;
+    }
+
+    if (command === 'config') {
+      if (sub !== 'get' || positionals.length !== 3) throw new UsageError('usage: square2 config get <key>');
+      const { config, diagnostics } = parseConfig(readOptional(join(dir, 'config.yaml')));
+      if (diagnostics.length > 0) {
+        out(diagnostics);
+        return 2;
+      }
+      const v = /** @type {Record<string, unknown>} */ (config.raw ?? {})[positionals[2]];
+      if (v === undefined || v === null) return 1;
+      if (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean') throw new UsageError(`config key ${positionals[2]} is not a scalar`);
+      io.stdout(`${String(v)}\n`);
+      return 0;
     }
 
     const repo = loadRepo(repoRoot, { provenance: command !== 'replay', dir });
@@ -336,6 +357,47 @@ function readBaseline(repo) {
 }
 
 /**
+ * `check --rev <sha>`: the full check on that commit's tree, in a temporary
+ * worktree (see withTemporaryWorktree: node_modules mirrored, hooks off,
+ * stripped git environment, removed on exit or signal). The catalogue,
+ * baseline and exceptions are the commit's own; the vendored copy in that
+ * tree is the one verified. `--report` and `--square2-dir` stay relative to
+ * the caller's directory.
+ * @param {{ argv: string[], io: CliIO, repoRoot: string, rev: string, out: (lines: string[]) => void }} a
+ * @returns {Promise<0 | 1 | 2>}
+ */
+async function checkAtRev(a) {
+  const sha = a.rev.startsWith('-') ? null : (await runGit(a.repoRoot, ['rev-parse', '--verify', '--quiet', `${a.rev}^{commit}`]).catch(() => null));
+  if (!sha || sha.code !== 0) {
+    a.out([formatDiagnostic('S2-BASE-UNRESOLVED', `--rev ${a.rev} is not a commit in this repository`, 'pass a commit sha (for a pushed ref, the local sha of the pushed commit)')]);
+    return 2;
+  }
+  /** @type {string[]} */
+  const rest = [];
+  for (let i = 0; i < a.argv.length; i++) {
+    const arg = a.argv[i];
+    const [flag, inline] = arg.startsWith('--') ? arg.split(/=(.*)/s, 2) : [arg, undefined];
+    if (flag === '--rev' || flag === '--root') {
+      if (inline === undefined) i++;
+      continue;
+    }
+    if (flag === '--report' || flag === '--square2-dir') {
+      const v = inline ?? a.argv[++i];
+      rest.push(flag, resolve(a.io.cwd, v));
+      continue;
+    }
+    rest.push(arg);
+  }
+  const env = { ...a.io.env };
+  if (env.SQUARE2_DIR) env.SQUARE2_DIR = resolve(a.io.cwd, env.SQUARE2_DIR);
+  return withTemporaryWorktree(a.repoRoot, sha.stdout.trim(), async (tree) => {
+    const lock = vendorPath(readLock(join(tree, '.square2')));
+    const toolRoot = lock !== null && existsSync(join(tree, lock, 'bin', 'square2.mjs')) ? join(tree, lock) : a.io.toolRoot;
+    return main([...rest, '--root', tree], { ...a.io, cwd: tree, env, toolRoot });
+  });
+}
+
+/**
  * @param {{
  *   io: CliIO,
  *   values: Record<string, string | boolean | undefined>,
@@ -420,9 +482,12 @@ async function check(a) {
     const stats = /** @type {Record<string, any>} */ (report.rules)[id];
     if (stats) stats.unknown = true;
   }
-  const reportPath = resolve(io.cwd, typeof values.report === 'string' ? values.report : 'square2-report.json');
-  mkdirSync(dirname(reportPath), { recursive: true });
-  writeFileSync(reportPath, serializeReport(report));
+  // no file unless asked for (the pre-push hook must not write into the repository)
+  if (typeof values.report === 'string') {
+    const reportPath = resolve(io.cwd, values.report);
+    mkdirSync(dirname(reportPath), { recursive: true });
+    writeFileSync(reportPath, serializeReport(report));
+  }
   if (decision.exitCode === 0) out([`square2: ok (${selected.filter((r) => r.enabled).length} rules, ${run.violations.length} violations all baselined or excepted)`]);
   return decision.exitCode;
 }

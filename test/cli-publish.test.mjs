@@ -256,10 +256,11 @@ describe('budget', () => {
     fake.runs['other.yml'] = [{ id: 5, created_at: '2026-11-03T00:00:00Z', run_started_at: '2026-11-03T00:00:00Z', updated_at: '2026-11-03T10:00:00Z' }];
     const gh = client(fake);
     const now = new Date('2026-11-10T12:00:00Z');
-    assert.equal(await monthToDateMinutes({ gh, workflows: ['square2-gate.yml', 'square2-review.yml'], now }), 122 * 1 + 46 * 3, 'ceil(run minutes) x jobs per workflow (gate 1, review 3); other workflows and last month ignored');
+    assert.equal(await monthToDateMinutes({ gh, workflows: ['square2-gate.yml', 'square2-review.yml'], now }), 122 + 46, 'default: one job per run (sequential jobs: wall time = billed time)');
+    assert.equal(await monthToDateMinutes({ gh, workflows: ['square2-gate.yml', 'square2-review.yml'], now, jobs: { 'square2-review.yml': 3 } }), 122 * 1 + 46 * 3, 'ceil(run minutes) x configured parallel jobs; other workflows and last month ignored');
     const calls = fake.log.filter((l) => l.includes('runs') || l.includes('jobs'));
-    assert.deepEqual(calls, ['list runs', 'list runs'], 'one paginated runs listing (two pages of three), no per-run jobs calls');
-    const r = await checkBudget({ gh, state: new StateIssue(gh), now, monthly: 600, workflows: ['square2-gate.yml', 'square2-review.yml'] });
+    assert.deepEqual(calls, ['list runs', 'list runs', 'list runs', 'list runs'], 'one paginated runs listing (two pages of three) per estimate, no per-run jobs calls');
+    const r = await checkBudget({ gh, state: new StateIssue(gh), now, monthly: 600, workflows: ['square2-gate.yml', 'square2-review.yml'], jobs: { 'square2-review.yml': 3 } });
     assert.equal(r.minutes, 260);
     assert.equal(r.warned, true);
     assert.match(stateIssue(fake)?.comments[0].body ?? '', /260 billed minutes.*threshold 240/);

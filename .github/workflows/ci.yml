@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HAS_FORBIDDEN_PATTERN: ${{ secrets.SQ2_FORBIDDEN_PATTERN != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # square² is repo-agnostic: no consumer-specific word may appear in it. The word list is the
+      # secret SQ2_FORBIDDEN_PATTERN (an extended regex, masked in logs), so this public repository
+      # never names a consumer. Forks have no such secret: the step is skipped there.
+      - name: agnosticism grep
+        if: env.HAS_FORBIDDEN_PATTERN == 'true'
+        env:
+          FORBIDDEN: ${{ secrets.SQ2_FORBIDDEN_PATTERN }}
+        run: |
+          set +e
+          git grep -qiE -e "$FORBIDDEN" -- .
+          status=$?
+          set -e
+          case "$status" in
+            1) echo "agnosticism grep: no consumer-specific words" ;;
+            0)
+              echo "::error::consumer-specific words found in:"
+              git grep -liE -e "$FORBIDDEN" -- .
+              exit 1
+              ;;
+            *)
+              echo "::error::git grep failed with status $status (invalid pattern?)"
+              exit 1
+              ;;
+          esac

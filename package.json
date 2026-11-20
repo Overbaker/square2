@@ -10,7 +10,8 @@
   },
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
-    "typecheck": "tsc -p jsconfig.json"
+    "typecheck": "tsc -p jsconfig.json",
+    "test:workflows": "node --test test/workflows.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

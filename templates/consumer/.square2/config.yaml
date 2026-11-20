@@ -1,0 +1,53 @@
+# square² settings. Block maps, block lists and plain or quoted scalars only (no flow syntax).
+
+# The integration branch: the gate publishes issues only for pushes here, the review runs on it.
+branch: main # CONSUMER: your integration branch (also in .github/workflows/square2-gate.yml)
+vendored_path: tools/square2
+language: en # en | zh | auto
+notify: # logins mentioned once in each run digest (nowhere else)
+  - your-login # CONSUMER
+max_new_issues_per_run: 10
+
+# Gate
+approvers: # who may approve baseline growth (.square2/approvals.yaml)
+  - your-login # CONSUMER
+max_exception_ttl_days: 90
+require_provenance: false # set to true once every rule has born_from and a replay report (docs/consumer-guide.md)
+generated: # never gated or reviewed
+  - '**/generated/**' # CONSUMER
+# engines: # CONSUMER: only the engines your rules use
+#   depcruise:
+#     config: .dependency-cruiser.cjs
+#   eslint:
+#     config: eslint.config.mjs
+#   ruff:
+#     command:
+#       - pipx
+#       - run
+#       - ruff==<version>
+
+# Review (advisory)
+reviewers: # primary first; a reviewer in an author's family is used only when nothing else is configured
+  - family: openai
+    provider: azure
+    model: your-deployment # CONSUMER: Azure OpenAI deployment name (also vars.SQ2_REVIEW_MODEL)
+risk_paths: # groups touching these are reviewed first and keep their diffs when trimmed
+  - 'db/**' # CONSUMER
+review_exclude:
+  - 'vendor/**' # CONSUMER
+max_findings: 10
+max_input_tokens: 200000
+max_calls_per_run: 6
+skip_note: false # true: note on the state issue when nothing fits the input budget
+
+# Minutes budget (warning on the state issue above the pro-rata threshold x 1.2)
+budget:
+  monthly_minutes: 600
+  workflows:
+    - square2-gate.yml
+    - square2-review.yml
+  # A run is estimated as its wall time (updated_at - run_started_at) times its job count, default 1.
+  # The square² workflows run their jobs one after another, so 1 is right for them. For a workflow
+  # whose jobs run in parallel, set how many run at once:
+  # jobs:
+  #   other-workflow.yml: 3

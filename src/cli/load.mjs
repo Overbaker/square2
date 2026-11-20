@@ -130,7 +130,8 @@ export function vendorPath(lock) {
  * @returns {string[]}
  */
 export function globalExcludes(repo) {
-  const path = vendorPath(readLock(repo.dir)) ?? repo.config.vendored_path;
+  // the lock is <root>/.square2/lock.json even when the catalogue comes from SQUARE2_DIR
+  const path = vendorPath(readLock(join(repo.root, '.square2'))) ?? repo.config.vendored_path;
   const vendored = path !== null && existsSync(join(repo.root, path)) ? [`${path}/**`] : [];
   return [...DEFAULT_EXCLUDES, ...repo.config.generated, ...vendored];
 }

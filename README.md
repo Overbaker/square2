@@ -2,7 +2,9 @@
 
 square² is a repo-agnostic skeleton with two planes. The **deterministic gate** runs a validated rule catalogue through engine adapters, subtracts a ratcheting baseline and expiring exceptions, and fails only on new violations, each printed with the fix (`Instead:`). The **advisory cross-family review** has a model from a different family than the code's authors review new commits and publish findings as issues; it never blocks anything.
 
-Status: v0.1 in progress.
+Status: v0.1 in progress. Both planes are advisory: square² reports and opens issues; it does not block merges.
+
+Docs: [gate rules](docs/dune-rules.md) · [consumer guide](docs/consumer-guide.md) · [trust model](docs/trust-model.md) · [auth](docs/auth.md). Templates for a consumer repository (workflows, `.square2/`, pre-push hook) are in [`templates/consumer/`](templates/consumer/).
 
 Zero runtime dependencies. Requires Node >= 22.
 
@@ -12,6 +14,10 @@ npm run typecheck
 npm test
 ```
 
+CI (`.github/workflows/ci.yml`) runs the same plus an agnosticism grep whose word list is the
+repository secret `SQ2_FORBIDDEN_PATTERN` (an extended regex, masked in logs), so the public
+repository never names a consumer. Without the secret (forks) that step is skipped.
+
 License: MIT.
 
 ## Commands
@@ -20,12 +26,16 @@ Run from the repository root (or pass `--root <dir>`). Exit codes: `0` pass, `1`
 
 | Command | What it does |
 |---|---|
-| `square2 check [--only <ids>] [--format text\|github] [--report <path>] [--base <sha>]` | Self-test, then run every enabled rule, subtract `.square2/baseline.json` and live exceptions, print `[ID] path:line message — Instead: …` lines and write `square2-report.json`. With `--base`, also enforce the baseline ratchet and exception immutability against that commit (all-zero sha = no previous commit; an unknown sha exits 2). |
+| `square2 check [--only <ids>] [--format text\|github] [--report <path>] [--base <sha>] [--rev <sha>]` | Self-test, then run every enabled rule, subtract `.square2/baseline.json` and live exceptions, and print `[ID] path:line message — Instead: …` lines. `--report <path>` writes the JSON report (nothing is written without it). With `--base`, also enforce the baseline ratchet and exception immutability against that commit (all-zero sha = no previous commit; an unknown sha exits 2). With `--rev`, gate that commit's tree in a temporary worktree instead of the working tree (the pre-push hook uses this). |
+| `square2 config get <key>` | Print one scalar of `.square2/config.yaml` (exit 1 when unset); the review workflow reads `branch` with it. |
 | `square2 selftest [--only <ids>]` | Every enabled rule must fire on `.square2/fixtures/<id>/bad/` and stay silent on `good/`. |
 | `square2 baseline show \| shrink \| grow --approval <id>` | Inspect, shrink (drop entries no longer observed), or grow (cite an entry of `.square2/approvals.yaml`) the baseline. |
 | `square2 exceptions lint [--base <sha>]` | Validate `.square2/exceptions.yaml`. |
 | `square2 vendor --from <path\|git-url> --ref <tag> [--into <dir>]` | Copy square² into `tools/square2/` and pin it in `.square2/lock.json`; the vendored runner refuses to run if its tree changes. |
 | `square2 replay --rule <id> (--commit <sha> \| --since <days>) [--out <file>]` | Run one rule on history in a temporary worktree: does it fire newly on `<sha>` and not on its parent; or which commits in the window it fires on (with `grade: null` per firing). |
+| `square2 review prepare \| run \| validate \| publish \| guard-env` | The daily review in three steps with separate credentials: `prepare` (context and tree archive), `run` (codex on a read-only copy, no GitHub token), `publish` (validated findings as issues, state). See [docs/consumer-guide.md](docs/consumer-guide.md). |
+| `square2 publish-gate [--report <path>] [--branch <name>] [--test]` | Publish new gate violations as issues (configured branch only, unless `--test`). |
+| `square2 budget` | Month-to-date Actions minutes of the square² workflows; warns on the state issue over the threshold. |
 
 `<ids>` is a comma-separated list of id globs such as `S2-DEP-*,S2-SUPPRESS-*`. `--square2-dir <dir>` (or `SQUARE2_DIR`) reads the catalogue from another directory.
 

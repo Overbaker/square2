@@ -54,9 +54,13 @@ export function advanceState(state, run) {
  * Lazily finds (or creates) the single state issue.
  */
 export class StateIssue {
-  /** @param {import('./github.mjs').GitHub} gh */
-  constructor(gh) {
+  /**
+   * @param {import('./github.mjs').GitHub} gh
+   * @param {{ bodyWriter?: boolean }} [opts] `bodyWriter: false` (gate): comments only, the body is never written
+   */
+  constructor(gh, opts = {}) {
     this.gh = gh;
+    this.bodyWriter = opts.bodyWriter !== false;
     /** @type {import('./github.mjs').Issue | null | undefined} */
     this.issue = undefined;
     /** @type {import('./github.mjs').Comment[] | undefined} */
@@ -77,8 +81,9 @@ export class StateIssue {
 
   /**
    * The state as it is on GitHub now (drops the cached issue): call right
-   * before writing. Gate and review workflows share one concurrency group
-   * (`square2-state-<repo>`) so two writers never interleave.
+   * before writing. Only the review publish job writes the body (its
+   * workflow runs in one concurrency group, so writes never interleave); the
+   * gate only comments.
    * @returns {Promise<State>}
    */
   async reread() {
@@ -96,13 +101,19 @@ export class StateIssue {
   async ensure() {
     const found = await this.find();
     if (found) return found;
-    this.issue = await this.gh.createIssue({ title: STATE_TITLE, body: serializeState(emptyState()), labels: [STATE_LABEL] });
-    this.comments = [];
-    return this.issue;
+    const created = await this.gh.createIssue({ title: STATE_TITLE, body: serializeState(emptyState()), labels: [STATE_LABEL] });
+    // a concurrent first run (gate and review are in different groups) may have created one too:
+    // everyone adopts the lowest-numbered state issue
+    this.issue = undefined;
+    const adopted = (await this.find()) ?? created;
+    this.issue = adopted;
+    this.comments = adopted.number === created.number ? [] : undefined;
+    return adopted;
   }
 
   /** @param {State} state */
   async write(state) {
+    if (!this.bodyWriter) throw new Error('this state handle may not write the state issue body (gate publishing only comments)');
     const issue = await this.ensure();
     const body = serializeState(state);
     if (issue.body === body) return;

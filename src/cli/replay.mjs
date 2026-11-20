@@ -107,9 +107,65 @@ async function resolveCommit(repoRoot, rev) {
 }
 
 /**
- * Evaluate one rule on historical trees through a single temporary worktree.
- * The caller's working tree and index are never touched; the worktree is
- * removed in `finally`.
+ * Run `body` against a temporary detached worktree of `first` (the caller's
+ * working tree and index are never touched). `checkout(sha)` moves the
+ * worktree to another commit. Each checkout is forced and cleaned, runs with
+ * hooks off and a stripped git environment, and mirrors the main checkout's
+ * node_modules. The worktree is removed in `finally`, and also on SIGINT or
+ * SIGTERM.
+ * @template T
+ * @param {string} repoRoot main checkout
+ * @param {string} first commit to check out first
+ * @param {(tree: string, checkout: (sha: string) => Promise<void>) => Promise<T>} body
+ * @returns {Promise<T>}
+ */
+export async function withTemporaryWorktree(repoRoot, first, body) {
+  const tmp = mkdtempSync(join(tmpdir(), 'square2-tree-'));
+  const tree = join(tmp, 'tree');
+  let added = false;
+  let cleaned = false;
+  const cleanupSync = () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (added) spawnSync('git', ['-C', repoRoot, 'worktree', 'remove', '--force', tree], { env: gitEnv(), stdio: 'ignore' });
+    rmSync(tmp, { recursive: true, force: true });
+    spawnSync('git', ['-C', repoRoot, 'worktree', 'prune'], { env: gitEnv(), stdio: 'ignore' });
+  };
+  /** @param {NodeJS.Signals} signal */
+  const onSignal = (signal) => {
+    cleanupSync();
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+    process.kill(process.pid, signal);
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  /** @param {string} sha */
+  const checkout = async (sha) => {
+    await git(tree, ['checkout', '--quiet', '--detach', '--force', sha], { config: HOOKS_OFF });
+    await git(tree, ['clean', '-fdxq'], { config: HOOKS_OFF });
+    await mirrorNodeModules(repoRoot, tree);
+  };
+  try {
+    await git(repoRoot, ['worktree', 'add', '--detach', '--quiet', tree, first], { config: HOOKS_OFF });
+    added = true;
+    await mirrorNodeModules(repoRoot, tree);
+    return await body(tree, checkout);
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+    if (!cleaned) {
+      cleaned = true;
+      if (added) await runGit(repoRoot, ['worktree', 'remove', '--force', tree]).catch(() => undefined);
+      rmSync(tmp, { recursive: true, force: true });
+      await runGit(repoRoot, ['worktree', 'prune']).catch(() => undefined);
+    }
+  }
+}
+
+/**
+ * Evaluate one rule on historical trees through a single temporary worktree
+ * (see withTemporaryWorktree).
  * @template T
  * @param {{
  *   repoRoot: string,
@@ -122,52 +178,19 @@ async function resolveCommit(repoRoot, rev) {
  * @returns {Promise<T>}
  */
 async function withWorktree(input, first, body) {
-  const tmp = mkdtempSync(join(tmpdir(), 'square2-replay-'));
-  const tree = join(tmp, 'tree');
-  let added = false;
-  let cleaned = false;
-  const cleanupSync = () => {
-    if (cleaned) return;
-    cleaned = true;
-    if (added) spawnSync('git', ['-C', input.repoRoot, 'worktree', 'remove', '--force', tree], { env: gitEnv(), stdio: 'ignore' });
-    rmSync(tmp, { recursive: true, force: true });
-    spawnSync('git', ['-C', input.repoRoot, 'worktree', 'prune'], { env: gitEnv(), stdio: 'ignore' });
-  };
-  /** @param {NodeJS.Signals} signal */
-  const onSignal = (signal) => {
-    cleanupSync();
-    process.off('SIGINT', onSignal);
-    process.off('SIGTERM', onSignal);
-    process.kill(process.pid, signal);
-  };
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
-  try {
-    await git(input.repoRoot, ['worktree', 'add', '--detach', '--quiet', tree, first], { config: HOOKS_OFF });
-    added = true;
+  return withTemporaryWorktree(input.repoRoot, first, async (tree, checkout) => {
     const rule = { ...input.rule, enabled: true };
     const excludes = globalExcludes({ root: input.repoRoot, dir: input.dir, config: input.config });
     /** @param {string | null} sha */
     const evaluate = async (sha) => {
       if (sha === null) return [];
-      await git(tree, ['checkout', '--quiet', '--detach', '--force', sha], { config: HOOKS_OFF });
-      await git(tree, ['clean', '-fdxq'], { config: HOOKS_OFF });
-      await mirrorNodeModules(input.repoRoot, tree);
+      await checkout(sha);
       const res = await runRules({ ...input, root: tree, mode: 'repo', rules: [rule], excludes });
       if (res.errors.length > 0) throw new ReplayError(res.errors.join('\n'));
       return res.violations;
     };
-    return await body(evaluate);
-  } finally {
-    process.off('SIGINT', onSignal);
-    process.off('SIGTERM', onSignal);
-    if (!cleaned) {
-      cleaned = true;
-      if (added) await runGit(input.repoRoot, ['worktree', 'remove', '--force', tree]).catch(() => undefined);
-      rmSync(tmp, { recursive: true, force: true });
-      await runGit(input.repoRoot, ['worktree', 'prune']).catch(() => undefined);
-    }
-  }
+    return body(evaluate);
+  });
 }
 
 /**

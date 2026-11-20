@@ -1,0 +1,150 @@
+# square² deterministic gate (advisory: it reports, it never blocks a push).
+# Copy to .github/workflows/ and adapt the `# CONSUMER:` blocks. Enable with the
+# repository variable SQ2_GATE_ENABLED=true; set it to anything else to switch it off.
+name: square2-gate
+
+on:
+  push:
+    branches:
+      - main # CONSUMER: your integration branch; must equal `branch:` in .square2/config.yaml
+    paths-ignore:
+      - 'docs/**'
+      - 'openspec/**'
+      - 'ref/**'
+      - '**/*.md'
+  pull_request:
+    branches:
+      - main # CONSUMER: same branch as above
+    paths-ignore:
+      - 'docs/**'
+      - 'openspec/**'
+      - 'ref/**'
+      - '**/*.md'
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Test publication from any ref: issues are labelled square2:test and closed as not planned'
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  # A newer push to the same ref cancels this check: only the latest commit matters.
+  check:
+    if: vars.SQ2_GATE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    concurrency:
+      group: square2-gate-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.gate.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      # CONSUMER: install the tools your enabled rules' engines run (square² itself needs only node).
+      # Node rules (dependency-cruiser, eslint) resolve the project's own install, so install the
+      # workspace as CI normally does; the pnpm store is cached by setup-node.
+      # - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      # - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      #   with:
+      #     node-version: 22
+      #     cache: pnpm
+      # - run: pnpm install --frozen-lockfile
+      # - run: pnpm -r build   # optional: only when a rule reads build output (generated types, dist/)
+      # Python rules (ruff) need no project sync: pin ruff in .square2/config.yaml as
+      #   engines:
+      #     ruff:
+      #       command:
+      #         - uvx
+      #         - ruff==<version>
+      # and install uv:
+      # - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      # Expected minutes: square² alone well under 1 per run; with a warm pnpm store a workspace install
+      # adds about 1, a cold one 2 to 4. Keep timeout-minutes at 6 and measure the first week.
+      - name: square2 check
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base=""
+          if [ "$EVENT" = push ] && [ -n "$BEFORE" ]; then
+            # all zeros = new branch (no previous baseline); a sha gone after a force-push is skipped
+            if [ "$BEFORE" = 0000000000000000000000000000000000000000 ] || git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then base="$BEFORE"; fi
+          elif [ "$EVENT" = pull_request ] && [ -n "$PR_BASE" ]; then
+            base="$(git merge-base "$PR_BASE" HEAD)"
+          fi
+          set +e
+          if [ -n "$base" ]; then
+            node tools/square2/bin/square2.mjs check --format=github --base "$base" --report square2-report.json
+          else
+            echo "note: no base commit; baseline ratchet not checked"
+            node tools/square2/bin/square2.mjs check --format=github --report square2-report.json
+          fi
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && steps.gate.outputs.code != ''
+        with:
+          name: square2-report
+          path: square2-report.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: verdict
+        env:
+          CODE: ${{ steps.gate.outputs.code }}
+        run: exit "${CODE:-2}"
+
+  # The only job with an issues token. It opens/updates finding issues and comments on the
+  # state issue (digest, overflow) but never writes the state issue's body. Publications run
+  # one at a time and are never cancelled (the review has its own group).
+  publish:
+    needs: check
+    if: >-
+      always() && vars.SQ2_GATE_ENABLED == 'true'
+      && (needs.check.outputs.code == '0' || needs.check.outputs.code == '1')
+      && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.test))
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: square2-gate-publish-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: square2-report
+      - name: square2 publish-gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+          TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.test }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          # publish-gate itself publishes only on the configured branch unless --test
+          if [ "$TEST" = true ]; then
+            node tools/square2/bin/square2.mjs publish-gate --report square2-report.json --branch "$BRANCH" --test --nonce "$RUN_ID"
+          else
+            node tools/square2/bin/square2.mjs publish-gate --report square2-report.json --branch "$BRANCH"
+          fi

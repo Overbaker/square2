@@ -86,7 +86,8 @@ export async function openRepo(values, io) {
   const dirOverride = values['square2-dir'] ?? io.env.SQUARE2_DIR;
   const dir = real(dirOverride ? resolve(io.cwd, dirOverride) : join(repoRoot, '.square2'));
   const toolRoot = io.toolRoot ?? resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const tamper = verifyVendor({ root: repoRoot, dir }, toolRoot);
+  // the lock always lives at <root>/.square2, whatever SQUARE2_DIR points the catalogue at
+  const tamper = verifyVendor({ root: repoRoot, dir: join(repoRoot, '.square2') }, toolRoot);
   if (tamper.status === 'tampered') throw new CommandError(tamper.line);
   const repo = loadRepo(repoRoot, { provenance: false, dir });
   if (repo.configDiagnostics.length > 0) throw new CommandError(repo.configDiagnostics.join('\n'));
@@ -209,7 +210,7 @@ export async function publishGateCommand(argv, io) {
     const nonce = test ? (values.nonce ?? io.env.GITHUB_RUN_ID ?? `${(io.now ?? new Date()).getTime()}`) : undefined;
     const inputId = gateInputId({ repo: gh.repo, branch: ref, head_sha: head, catalogue_digest: String(report.catalogue_digest ?? ''), test, nonce });
     const enabled = new Set(repo.catalogue.rules.filter((r) => r.enabled).map((r) => r.id));
-    const state = new StateIssue(gh);
+    const state = new StateIssue(gh, { bodyWriter: false });
     const res = await publish({
       gh,
       state,
@@ -270,7 +271,7 @@ export async function budgetCommand(argv, io) {
     const gh = github(io, values);
     const b = budgetConfig(repo.config.raw);
     try {
-      const r = await checkBudget({ gh, state: new StateIssue(gh), now: io.now ?? new Date(), monthly: b.monthly, workflows: b.workflows, jobs: b.jobs });
+      const r = await checkBudget({ gh, state: new StateIssue(gh, { bodyWriter: false }), now: io.now ?? new Date(), monthly: b.monthly, workflows: b.workflows, jobs: b.jobs });
       out([`budget: ${r.minutes} minutes month-to-date, threshold ${Math.round(r.threshold * 10) / 10}${r.warned ? ' (warning posted)' : ''}`]);
       stepSummary(io, `square² budget: ${r.minutes} minutes month-to-date (threshold ${Math.round(r.threshold * 10) / 10})`);
     } catch (e) {
