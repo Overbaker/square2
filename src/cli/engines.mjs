@@ -4,16 +4,18 @@ import { compareViolations, AdapterOutputError, formatDiagnostic } from '../core
 import { adapter as command } from '../engines/command.mjs';
 import { adapter as depcruise } from '../engines/depcruise.mjs';
 import { adapter as eslint } from '../engines/eslint.mjs';
+import { adapter as pattern } from '../engines/pattern.mjs';
 import { adapter as ruff } from '../engines/ruff.mjs';
 import { adapter as suppressions } from '../engines/suppressions.mjs';
 import { EngineError, defaultExec, listFiles, mapConcurrent, resolveNodeBin } from './engine-util.mjs';
 
 /** @type {Record<string, import('./engine-util.mjs').EngineAdapter>} */
-export const ADAPTERS = Object.freeze({ command, depcruise, eslint, ruff, suppressions });
+export const ADAPTERS = Object.freeze({ command, depcruise, eslint, pattern, ruff, suppressions });
 
 /**
  * Injectable engine dependencies.
  * @typedef {object} EngineDeps
+ * @property {boolean} [failOnUnknown] a rule whose result is `unknown` (pattern timeout) is a fatal error (replay)
  * @property {Record<string, import('./engine-util.mjs').EngineAdapter>} [adapters]
  * @property {import('./engine-util.mjs').Exec} [exec]
  * @property {(repoRoot: string, name: string, pkg: string) => string[]} [resolveBin]
@@ -25,6 +27,7 @@ export const ADAPTERS = Object.freeze({ command, depcruise, eslint, ruff, suppre
  * @property {Record<string, string>} versions engine name to version
  * @property {string[]} errors fatal diagnostics (`[S2-ENGINE-*]`, `[S2-ADAPTER-INVALID]`)
  * @property {string[]} warnings
+ * @property {string[]} unknown rules whose result is unknown (they report no violations; never auto-close their issues)
  */
 
 /**
@@ -77,6 +80,8 @@ export async function runRules(input) {
   const versions = {};
   /** @type {string[]} */
   const errors = [];
+  /** @type {string[]} */
+  const unknown = [];
   for (const [engine, rules] of groups) {
     const adapter = adapters[engine];
     if (!adapter) {
@@ -86,13 +91,18 @@ export async function runRules(input) {
     try {
       const res = await adapter.run({ root: input.root, repoRoot: input.repoRoot, mode: input.mode, rules, config: input.config, excludes: input.excludes, exec, resolveBin: (name, pkg) => resolveBin(input.repoRoot, name, pkg), files, warn });
       checkOwnRules(engine, rules, res);
-      violations.push(...res.violations);
+      const own = new Set(rules.map((r) => r.id));
+      const raw = /** @type {{ unknown?: unknown }} */ (res).unknown;
+      const lost = (Array.isArray(raw) ? raw : []).filter((id) => typeof id === 'string' && own.has(id));
+      unknown.push(...lost);
+      if (input.failOnUnknown && lost.length > 0) errors.push(formatDiagnostic('S2-PATTERN-TIMEOUT', `result unknown for ${lost.join(', ')} (pattern timeout)`, 'simplify the pattern; a rule with an unknown result cannot be replayed'));
+      violations.push(...res.violations.filter((v) => !lost.includes(v.rule_id)));
       versions[engine] = res.version;
     } catch (err) {
       errors.push(fatal(err));
     }
   }
-  return { violations: violations.sort(compareViolations), versions, errors, warnings };
+  return { violations: violations.sort(compareViolations), versions, errors, warnings, unknown: unknown.sort() };
 }
 
 /**

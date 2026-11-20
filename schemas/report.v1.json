@@ -67,6 +67,10 @@
           "expired"
         ],
         "properties": {
+          "unknown": {
+            "type": "boolean",
+            "description": "true when the rule's result is unknown for this run (pattern timeout): no violations reported, its issues are not auto-closed"
+          },
           "hits": {
             "type": "integer",
             "minimum": 0

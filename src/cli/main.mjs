@@ -25,6 +25,8 @@ import { runRules, selftest } from './engines.mjs';
 import { globalExcludes, loadRepo, readOptional, selectRules } from './load.mjs';
 import { ReplayError, replayCommit, replaySince } from './replay.mjs';
 import { VendorError, vendor, verifyVendor } from './vendor.mjs';
+import { budgetCommand, publishGateCommand } from './publish-cmd.mjs';
+import { reviewCommand } from './review-cmd.mjs';
 import { VERSION } from './version.mjs';
 
 export const USAGE = `square² (方方) ${VERSION}
@@ -47,6 +49,19 @@ Commands:
                          copy square² into the repository and write .square2/lock.json
   replay --rule <id> (--commit <sha> | --since <days>) [--out <file>]
                          run one rule against history in a temporary worktree
+  review prepare [--branch <name>] [--out <dir>] [--pr <n> --base <sha> --head <sha> | --from <sha> --to <sha>]
+                         read the state issue and write the review context directory (default square2-review)
+  review run [--context <dir>] [--out <dir>] [--model <deployment>] [--fallback-model <deployment>] [--allow-same-family]
+                         analysis step: codex in a read-only copy of the tree (no GitHub credentials)
+  review validate [--context <dir>] [--analysis <dir>] [--out <path>] [--allow-same-family]
+                         validate the model output (exit 1: review-error, nothing to publish)
+  review publish [--context <dir>] [--analysis <dir>] [--allow-same-family]
+                         freshness check, publish finding issues, advance the state issue
+                         (same-family output only with this step's own --allow-same-family)
+  review guard-env       exit 1 if GITHUB_TOKEN, GH_TOKEN or ACTIONS_RUNTIME_TOKEN is set
+  budget                 month-to-date minutes of the square² workflows; warns on the state issue
+  publish-gate [--report square2-report.json] [--branch <name>] [--test]
+                         publish new gate violations as issues (configured branch only, unless --test)
 
 Common options:
   --root <dir>           repository root (default: the git top level of the current directory)
@@ -68,6 +83,9 @@ Common options:
  * @property {Record<string, import('./engine-util.mjs').EngineAdapter>} [adapters]
  * @property {import('./engine-util.mjs').Exec} [exec]
  * @property {(repoRoot: string, name: string, pkg: string) => string[]} [resolveBin]
+ * @property {typeof fetch} [fetch] GitHub REST transport for the publish commands
+ * @property {import('./publish-cmd.mjs').GitOps} [gitOps]
+ * @property {import('./publish-cmd.mjs').ReviewImpl} [review]
  */
 
 const OPTIONS = /** @type {const} */ ({
@@ -113,6 +131,10 @@ export async function main(argv, io) {
   const out = (lines) => { for (const l of lines) io.stdout(l + '\n'); };
   /** @param {string[]} lines */
   const err = (lines) => { for (const l of lines) io.stderr(l + '\n'); };
+  const early = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: false }).positionals[0];
+  if (early === 'review' && ((!argv.includes('--help') && !argv.includes('-h')) || argv.includes('run'))) return reviewCommand(argv, io);
+  if (early === 'publish-gate' && !argv.includes('--help') && !argv.includes('-h')) return publishGateCommand(argv, io);
+  if (early === 'budget' && !argv.includes('--help') && !argv.includes('-h')) return budgetCommand(argv, io);
   let parsed;
   try {
     parsed = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true });
@@ -389,11 +411,15 @@ async function check(a) {
     runner_version: VERSION,
     catalogue_digest: repo.catalogue.digest,
     engine_versions: run.versions,
-    rule_ids: selected.map((r) => r.id),
+    rule_ids: selected.filter((r) => r.enabled).map((r) => r.id),
     classification,
     exit_code: decision.exitCode,
     today: runDate,
   });
+  for (const id of run.unknown) {
+    const stats = /** @type {Record<string, any>} */ (report.rules)[id];
+    if (stats) stats.unknown = true;
+  }
   const reportPath = resolve(io.cwd, typeof values.report === 'string' ? values.report : 'square2-report.json');
   mkdirSync(dirname(reportPath), { recursive: true });
   writeFileSync(reportPath, serializeReport(report));
@@ -445,7 +471,8 @@ async function baselineCommand(a) {
   const path = join(repo.dir, 'baseline.json');
   if (sub === 'shrink') {
     const enabled = new Set(repo.catalogue.rules.filter((r) => r.enabled).map((r) => r.id));
-    const disabled = new Set(repo.catalogue.rules.filter((r) => !r.enabled).map((r) => r.id));
+    // a rule whose result is unknown (pattern timeout) keeps its entries like a disabled one
+    const disabled = new Set([...repo.catalogue.rules.filter((r) => !r.enabled).map((r) => r.id), ...run.unknown]);
     const kept = bl.baseline.entries.filter((e) => disabled.has(e.rule_id));
     const active = { ...bl.baseline, entries: bl.baseline.entries.filter((e) => enabled.has(e.rule_id)) };
     const next = normalizeBaseline([...shrink(active, run.violations).entries, ...kept]);

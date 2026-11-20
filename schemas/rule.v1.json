@@ -85,6 +85,7 @@
             "command",
             "depcruise",
             "eslint",
+            "pattern",
             "ruff",
             "suppressions"
           ]

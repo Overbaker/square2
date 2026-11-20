@@ -3,7 +3,40 @@ import { PathError, sha256Hex, toPosixPath } from './fingerprint.mjs';
 import { RULE_ID_PATTERN, formatDiagnostic } from './violation.mjs';
 import { YamlError, errorMessage, parseYaml } from './yaml.mjs';
 
-export const ENGINES = Object.freeze(['command', 'depcruise', 'eslint', 'ruff', 'suppressions']);
+export const ENGINES = Object.freeze(['command', 'depcruise', 'eslint', 'pattern', 'ruff', 'suppressions']);
+export const MAX_PATTERN_LENGTH = 500;
+
+/**
+ * Why `pattern` engine options are unsafe or invalid, or null. Patterns are
+ * JavaScript regexes up to 500 characters with flags from `imsu`; nested
+ * quantifiers and backreferences are rejected so matching stays linear in
+ * practice.
+ * @param {Record<string, unknown>} options
+ * @returns {string | null}
+ */
+export function patternOptionsProblem(options) {
+  for (const key of Object.keys(options)) {
+    if (!['pattern', 'flags', 'require_absent', 'message'].includes(key)) return `unknown pattern option ${key}`;
+  }
+  if (typeof options.flags !== 'undefined' && !(typeof options.flags === 'string' && /^[imsu]*$/.test(options.flags) && new Set(options.flags).size === options.flags.length)) {
+    return 'flags may only use i, m, s and u';
+  }
+  if (options.message !== undefined && typeof options.message !== 'string') return 'message must be text';
+  for (const key of ['pattern', 'require_absent']) {
+    const v = options[key];
+    if (v === undefined && key === 'require_absent') continue;
+    if (typeof v !== 'string' || v === '') return `${key} must be a non-empty regex`;
+    if (v.length > MAX_PATTERN_LENGTH) return `${key} is longer than ${MAX_PATTERN_LENGTH} characters`;
+    if (/\\[1-9]|\\k</.test(v)) return `${key} uses a backreference`;
+    if (/\((?:[^()\\]|\\.)*(?:[*+]|\{\d+,\d*\})(?:[^()\\]|\\.)*\)(?:[*+?]|\{\d+,?\d*\})/.test(v)) return `${key} has a nested quantifier`;
+    try {
+      new RegExp(v, typeof options.flags === 'string' ? options.flags : '');
+    } catch (err) {
+      return `${key} is not a valid regex: ${err instanceof Error ? err.message : 'error'}`;
+    }
+  }
+  return null;
+}
 const REQUIRED = /** @type {const} */ (['id', 'dune_rule', 'engine', 'scope', 'instead', 'owner']);
 const ALLOWED = new Set([...REQUIRED, 'description', 'enabled', 'exclude', 'options', 'born_from', 'replay', 'require_reason']);
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/;
@@ -204,6 +237,9 @@ function validateRule(file, entry, index, io, diagnostics) {
   if (r.description !== undefined && typeof r.description !== 'string') fail('invalid description', 'set description to a string');
   if (r.options !== undefined && (r.options === null || typeof r.options !== 'object' || Array.isArray(r.options))) {
     fail('invalid options', 'set options to a map');
+  } else if (r.engine === 'pattern') {
+    const problem = patternOptionsProblem(/** @type {Record<string, unknown>} */ (r.options ?? {}));
+    if (problem) fail(`invalid pattern options: ${problem}`, 'set options.pattern to a JavaScript regex (flags imsu, no nested quantifiers or backreferences)');
   }
   if (r.born_from !== undefined && !(typeof r.born_from === 'string' && SHA_PATTERN.test(r.born_from))) {
     fail('invalid born_from', 'set born_from to the lowercase hex sha (7-40 chars) of the commit that introduced the defect');

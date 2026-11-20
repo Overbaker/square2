@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:square2:schema:review:v1",
+  "title": "square2 staged review result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["language", "groups", "questions", "suggestions"],
+  "properties": {
+    "language": { "enum": ["en", "zh"] },
+    "groups": { "type": "array", "items": { "$ref": "#/$defs/group" } },
+    "questions": { "type": "array", "items": { "$ref": "#/$defs/text" } },
+    "suggestions": { "type": "array", "items": { "$ref": "#/$defs/text" } }
+  },
+  "$defs": {
+    "text": { "type": "string", "pattern": "\\S" },
+    "status": { "enum": ["pass", "needs_changes", "needs_clarification", "not_reviewed"] },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "summary", "evidence"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "summary": { "$ref": "#/$defs/text" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/text" } }
+      }
+    },
+    "code": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "summary", "findings"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "summary": { "$ref": "#/$defs/text" },
+        "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+      }
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "requirement", "approach", "code"],
+      "properties": {
+        "id": { "$ref": "#/$defs/text" },
+        "requirement": { "$ref": "#/$defs/stage" },
+        "approach": { "$ref": "#/$defs/stage" },
+        "code": { "$ref": "#/$defs/code" }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "path", "line", "side", "title", "failure_case", "suggestion", "enclosing_symbol", "mechanizable"],
+      "properties": {
+        "severity": { "enum": ["Blocker", "Major", "Minor", "Nit"] },
+        "path": { "$ref": "#/$defs/text" },
+        "line": { "type": "integer", "minimum": 1 },
+        "side": { "enum": ["LEFT", "RIGHT"] },
+        "title": { "$ref": "#/$defs/text" },
+        "failure_case": { "$ref": "#/$defs/text" },
+        "suggestion": { "$ref": "#/$defs/text" },
+        "enclosing_symbol": { "$ref": "#/$defs/text" },
+        "mechanizable": { "type": "boolean" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$", "description": "required when the diff is per-commit patches: the commit whose patch shows the line" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/text" } }
+      }
+    }
+  }
+}
