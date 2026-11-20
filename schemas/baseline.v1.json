@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:square2:schema:baseline:v1",
+  "title": "square2 baseline",
+  "description": "Multiset of fingerprints. Entries are unique by fingerprint and sorted by it; fingerprint = sha256(rule_id \\0 path \\0 subject).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "entries"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fingerprint", "rule_id", "path", "subject", "count"],
+        "properties": {
+          "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "rule_id": { "type": "string" },
+          "path": { "type": "string" },
+          "subject": { "type": "string" },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}

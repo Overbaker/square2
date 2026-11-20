@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:square2:schema:exceptions:v1",
+  "title": "square2 exceptions registry",
+  "description": "expires_at - created_at must not exceed max_exception_ttl_days (default 90). Live through the end of expires_at in UTC. created_at must not be after the run date.",
+  "type": [
+    "object",
+    "null"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "exceptions": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "rule_id",
+          "scope",
+          "reason",
+          "owner",
+          "adr",
+          "created_at",
+          "expires_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "rule_id": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]+(-[A-Z0-9]+)+$"
+          },
+          "scope": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Repo-relative glob ('\\\\' counts as '/'; leading './' is stripped first). Rejected when every segment is wildcard-only ([*?]+ containing '*', e.g. '**', '*', '**/?*', '*?') or '.', when absolute, a drive path, containing a '..' segment or a C0 control character.",
+            "allOf": [
+              {
+                "not": {
+                  "pattern": "^\\s*[/\\\\]*(?:(?:\\.|[*?]*\\*[*?]*)(?:[/\\\\]+(?:\\.|[*?]*\\*[*?]*))*)?[/\\\\]*\\s*$"
+                }
+              },
+              {
+                "not": {
+                  "pattern": "^\\s*(?:\\.[/\\\\]+(?![/\\\\]))*(?:[/\\\\]|[A-Za-z]:)"
+                }
+              },
+              {
+                "not": {
+                  "pattern": "(?:^\\s*|[/\\\\])\\.\\.(?:[/\\\\]|\\s*$)"
+                }
+              },
+              {
+                "not": {
+                  "pattern": "[\u0000-\u001f]"
+                }
+              }
+            ]
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "adr": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "created_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "expires_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "renews": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "exceptions"
+  ]
+}
