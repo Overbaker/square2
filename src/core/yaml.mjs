@@ -5,7 +5,9 @@
  */
 
 /**
- * @typedef {null | boolean | number | string | YamlValue[] | { [key: string]: YamlValue }} YamlValue
+ * @typedef {null | boolean | number | string | YamlValueArray | YamlValueObject} YamlValue
+ * @typedef {YamlValue[]} YamlValueArray
+ * @typedef {{ [key: string]: YamlValue }} YamlValueObject
  */
 
 export class YamlError extends Error {

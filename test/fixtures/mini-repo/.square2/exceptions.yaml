@@ -1,0 +1,9 @@
+exceptions:
+  - id: E-0001
+    rule_id: S2-SUPPRESS-UNREGISTERED
+    scope: apps/web/legacy/**
+    reason: legacy module is being deleted
+    owner: platform
+    adr: ADR-7
+    created_at: 2026-11-01
+    expires_at: 2027-01-15

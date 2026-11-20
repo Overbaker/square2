@@ -5,7 +5,8 @@ import { YamlError, errorMessage, parseYaml } from './yaml.mjs';
 
 export const ENGINES = Object.freeze(['command', 'depcruise', 'eslint', 'ruff', 'suppressions']);
 const REQUIRED = /** @type {const} */ (['id', 'dune_rule', 'engine', 'scope', 'instead', 'owner']);
-const ALLOWED = new Set([...REQUIRED, 'description', 'enabled', 'exclude', 'options']);
+const ALLOWED = new Set([...REQUIRED, 'description', 'enabled', 'exclude', 'options', 'born_from', 'replay', 'require_reason']);
+const SHA_PATTERN = /^[0-9a-f]{7,40}$/;
 export const CATALOGUE_EXIT_CODE = 2;
 
 /**
@@ -21,7 +22,28 @@ export const CATALOGUE_EXIT_CODE = 2;
  * @property {string} [description]
  * @property {Record<string, import('./yaml.mjs').YamlValue>} options
  * @property {string} file the rule file it came from
+ * @property {string} [born_from] commit sha of the real defect the rule was born from
+ * @property {string} [replay] path of the replay report (default `.square2/replay/<id>.json`)
+ * @property {boolean} [require_reason] suppressions only: report only suppressions without reason text
  */
+
+/**
+ * Validation I/O. `readReplay(path)` returns the replay report text or null;
+ * with `requireProvenance`, every enabled rule needs `born_from` and a report
+ * showing it fires on that commit and not on its parent.
+ * @typedef {object} CatalogueIO
+ * @property {(ruleId: string) => boolean} fixtureDirExists
+ * @property {boolean} [requireProvenance]
+ * @property {(path: string) => string | null} [readReplay]
+ */
+
+/**
+ * @param {{ id: string, replay?: string }} rule
+ * @returns {string}
+ */
+export function replayPath(rule) {
+  return rule.replay ?? `.square2/replay/${rule.id}.json`;
+}
 
 /**
  * @typedef {object} CatalogueResult
@@ -89,7 +111,7 @@ function displayPath(p) {
  * Validate rule files. I/O is injected: `fixtureDirExists(id)` reports
  * whether `.square2/fixtures/<id>/bad/` exists.
  * @param {{ path: string, text: string }[]} files
- * @param {{ fixtureDirExists: (ruleId: string) => boolean }} io
+ * @param {CatalogueIO} io
  * @returns {CatalogueResult}
  */
 export function validateCatalogue(files, io) {
@@ -138,7 +160,7 @@ export function validateCatalogue(files, io) {
  * @param {string} file
  * @param {unknown} entry
  * @param {number} index
- * @param {{ fixtureDirExists: (ruleId: string) => boolean }} io
+ * @param {CatalogueIO} io
  * @param {string[]} diagnostics
  * @returns {Rule | null}
  */
@@ -183,11 +205,30 @@ function validateRule(file, entry, index, io, diagnostics) {
   if (r.options !== undefined && (r.options === null || typeof r.options !== 'object' || Array.isArray(r.options))) {
     fail('invalid options', 'set options to a map');
   }
+  if (r.born_from !== undefined && !(typeof r.born_from === 'string' && SHA_PATTERN.test(r.born_from))) {
+    fail('invalid born_from', 'set born_from to the lowercase hex sha (7-40 chars) of the commit that introduced the defect');
+  }
+  /** @type {string | null} */
+  let replay = null;
+  if (r.replay !== undefined) {
+    const list = typeof r.replay === 'string' ? globList(r.replay) : null;
+    if (list === null || /[*?]/.test(list[0])) fail('invalid replay', 'set replay to a repo-relative path such as .square2/replay/<id>.json');
+    else replay = list[0];
+  }
+  if (r.require_reason !== undefined) {
+    if (typeof r.require_reason !== 'boolean') fail('invalid require_reason', 'set require_reason to true or false');
+    else if (r.engine !== 'suppressions') fail('require_reason is only valid for the suppressions engine', 'remove require_reason or use engine: suppressions');
+  }
   for (const key of Object.keys(r)) {
     if (!ALLOWED.has(key)) fail(`unknown field ${key}`, `use only ${[...ALLOWED].join(', ')}`);
   }
   if (typeof r.id === 'string' && RULE_ID_PATTERN.test(r.id) && !io.fixtureDirExists(r.id)) {
     fail(`missing fixture .square2/fixtures/${r.id}/bad/`, `add a negative fixture under .square2/fixtures/${r.id}/bad/ that the rule must flag`);
+  }
+  if (diagnostics.length === before && io.requireProvenance && r.enabled !== false) {
+    const id = /** @type {string} */ (r.id);
+    const problem = provenanceProblem(id, typeof r.born_from === 'string' ? r.born_from : undefined, replay ?? replayPath({ id }), io);
+    if (problem) diagnostics.push(formatDiagnostic('S2-CATALOGUE', `${id} ${problem} (${file})`, 'record born_from and commit `square2 replay --rule <id> --commit <born_from> --out .square2/replay/<id>.json`, or set enabled: false'));
   }
   if (diagnostics.length !== before) return null;
   /** @type {Rule} */
@@ -204,7 +245,42 @@ function validateRule(file, entry, index, io, diagnostics) {
     file,
   };
   if (typeof r.description === 'string') rule.description = r.description;
+  if (typeof r.born_from === 'string') rule.born_from = r.born_from;
+  if (replay !== null) rule.replay = replay;
+  if (typeof r.require_reason === 'boolean') rule.require_reason = r.require_reason;
   return rule;
+}
+
+/**
+ * @param {string} id
+ * @param {string | undefined} bornFrom
+ * @param {string} path
+ * @param {CatalogueIO} io
+ * @returns {string | null}
+ */
+function provenanceProblem(id, bornFrom, path, io) {
+  let text = null;
+  try {
+    text = io.readReplay ? io.readReplay(path) : null;
+  } catch {
+    text = null;
+  }
+  if (bornFrom === undefined || text === null) return 'missing born_from replay';
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    return 'replay report is not valid JSON';
+  }
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return 'replay report is not a JSON object';
+  const commit = doc.commit !== null && typeof doc.commit === 'object' ? doc.commit : null;
+  const parent = doc.parent !== null && typeof doc.parent === 'object' ? doc.parent : null;
+  const sha = commit && typeof commit.sha === 'string' ? commit.sha : '';
+  const sameCommit = sha.length >= 7 && (sha.startsWith(bornFrom) || bornFrom.startsWith(sha));
+  if (doc.rule_id !== id || !sameCommit || !commit || commit.fires !== true || !parent || parent.fires !== false) {
+    return 'replay does not show firing on born_from and not on its parent';
+  }
+  return null;
 }
 
 /**

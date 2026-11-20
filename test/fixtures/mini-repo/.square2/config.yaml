@@ -1,0 +1,9 @@
+approvers:
+  - alice
+max_exception_ttl_days: 90
+generated:
+  - apps/web/generated/**
+engines:
+  ruff:
+    command:
+      - ruff

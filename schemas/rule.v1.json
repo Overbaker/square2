@@ -124,8 +124,46 @@
         },
         "options": {
           "type": "object"
+        },
+        "born_from": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$",
+          "description": "Commit that introduced the real defect this rule was born from."
+        },
+        "replay": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/glob"
+            },
+            {
+              "not": {
+                "pattern": "[*?]"
+              }
+            }
+          ],
+          "description": "Replay report path (default .square2/replay/<id>.json). Required with born_from when config require_provenance is true."
+        },
+        "require_reason": {
+          "type": "boolean",
+          "description": "suppressions engine only: report only suppressions without reason text."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "require_reason"
+            ]
+          },
+          "then": {
+            "properties": {
+              "engine": {
+                "const": "suppressions"
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

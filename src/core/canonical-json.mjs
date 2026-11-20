@@ -1,5 +1,7 @@
 /**
- * @typedef {null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }} JsonValue
+ * @typedef {null | boolean | number | string | JsonValueArray | JsonValueObject} JsonValue
+ * @typedef {JsonValue[]} JsonValueArray
+ * @typedef {{ [key: string]: JsonValue }} JsonValueObject
  */
 
 /**

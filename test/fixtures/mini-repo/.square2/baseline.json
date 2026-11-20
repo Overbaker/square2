@@ -1,0 +1,54 @@
+{
+  "entries": [
+    {
+      "count": 1,
+      "fingerprint": "44b65cf20f9643162a9f43e696aa41dbcd270742dd0bffd9917a97d692ed8f6e",
+      "path": "python/pkg/mod.py",
+      "rule_id": "S2-SUPPRESS-UNREGISTERED",
+      "subject": "noqa BLE001"
+    },
+    {
+      "count": 1,
+      "fingerprint": "4724d71e35e762dada6d4a0fac3d3dea54e4bbc0a9d333aa22c1eec529f0bc31",
+      "path": "apps/web/legacy/old.ts",
+      "rule_id": "S2-SUPPRESS-BARE",
+      "subject": "eslint-disable"
+    },
+    {
+      "count": 1,
+      "fingerprint": "b743560504021bca5299b7b4fda297f60bc2eeb77918aa04db2dd614aab5c9ef",
+      "path": "python/pkg/mod.py",
+      "rule_id": "S2-PY-BANNED-IMPORT",
+      "subject": "TID251 `requests` is banned: use the shared client"
+    },
+    {
+      "count": 1,
+      "fingerprint": "c1ceb80b704e2eb5f62deb7873ac8372e9c4ec75aefc25c1737aa25ac41c1fec",
+      "path": "apps/web/src/index.ts",
+      "rule_id": "S2-SUPPRESS-BARE",
+      "subject": "@ts-ignore"
+    },
+    {
+      "count": 1,
+      "fingerprint": "d060a58ac4832b86d237c78430b9e833547bf60fcfa7e8e3f8fc9d80414506d5",
+      "path": "apps/web/src/index.ts",
+      "rule_id": "S2-SUPPRESS-UNREGISTERED",
+      "subject": "@ts-ignore"
+    },
+    {
+      "count": 1,
+      "fingerprint": "df31969ed5ed882af1608d6e6c63999344e022aa99f682a2c457c57697eaf622",
+      "path": "apps/web/src/db.ts",
+      "rule_id": "S2-DEP-NO-VENDOR",
+      "subject": "pg"
+    },
+    {
+      "count": 1,
+      "fingerprint": "fe842afbb57ac7fea8842fe5bd47a53cb1dcd31d8046866622d7f14232f0afdf",
+      "path": "apps/web/src/index.ts",
+      "rule_id": "S2-SUPPRESS-UNREGISTERED",
+      "subject": "eslint-disable-next-line no-console"
+    }
+  ],
+  "schema_version": 1
+}

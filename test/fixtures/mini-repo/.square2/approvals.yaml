@@ -1,0 +1,6 @@
+approvals:
+  - id: A-0001
+    approver: alice
+    date: 2026-11-20
+    reason: introduction
+    adr: ADR-1

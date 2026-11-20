@@ -1,0 +1,12 @@
+rules:
+  - id: S2-ROUTE-LANES
+    dune_rule: 2
+    engine: command
+    scope: routes/**
+    instead: add a router entry for the published (message, lane) pair
+    owner: platform
+    options:
+      argv:
+        - node
+        - scripts/check-routes.mjs
+        - "{root}"

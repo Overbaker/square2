@@ -1,0 +1,9 @@
+rules:
+  - id: S2-LINT-NO-CONSOLE
+    dune_rule: 2
+    engine: eslint
+    scope: apps/**
+    instead: use the logger
+    owner: platform
+    options:
+      rule: no-console

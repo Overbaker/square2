@@ -1,0 +1,9 @@
+rules:
+  - id: S2-PY-BANNED-IMPORT
+    dune_rule: 2
+    engine: ruff
+    scope: python/**
+    instead: use the shared http client
+    owner: platform
+    options:
+      select: TID251

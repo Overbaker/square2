@@ -1,0 +1,9 @@
+rules:
+  - id: S2-DEP-NO-VENDOR
+    dune_rule: 2
+    engine: depcruise
+    scope: apps/**
+    exclude:
+      - "**/test/**"
+    instead: use the platform adapters instead of vendor SDKs
+    owner: platform

@@ -1,0 +1,18 @@
+rules:
+  - id: S2-SUPPRESS-UNREGISTERED
+    dune_rule: 5
+    engine: suppressions
+    scope:
+      - apps/**
+      - python/**
+    instead: fix the cause, or register an exception in .square2/exceptions.yaml
+    owner: platform
+  - id: S2-SUPPRESS-BARE
+    dune_rule: 5
+    engine: suppressions
+    scope:
+      - apps/**
+      - python/**
+    require_reason: true
+    instead: "add the reason after the codes (-- why), or fix the cause"
+    owner: platform
