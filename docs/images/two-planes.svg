@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-label="square2 two-plane architecture: Plane 1 Deterministic Ratcheting Gate and Plane 2 Advisory Cross-Family Review">
+  <defs>
+    <marker id="arrAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#F59E0B"/>
+    </marker>
+    <marker id="arrViolet" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#A78BFA"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="400" rx="18" fill="#0D111A" stroke="#282E42" stroke-width="1.5"/>
+  <text x="40" y="44" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="800" fill="#F8FAFC">Two Planes: Deterministic Quality Gate + Credential-Isolated Cross-Family Review</text>
+  <text x="40" y="66" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" fill="#94A3B8">Repo-agnostic skeleton · self-tested rules · tamper-evident vendoring · advisory by default</text>
+
+  <!-- Plane 1 -->
+  <rect x="36" y="88" width="1128" height="136" rx="14" fill="#131724" stroke="#362D22" stroke-width="1.5"/>
+  <rect x="52" y="102" width="236" height="24" rx="6" fill="#F59E0B" fill-opacity="0.18" stroke="#F59E0B" stroke-opacity="0.5"/>
+  <text x="170" y="118" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="800" fill="#FDE68A">PLANE 1 · DETERMINISTIC GATE</text>
+
+  <rect x="52" y="138" width="214" height="72" rx="10" fill="#191E2F" stroke="#334155"/>
+  <text x="159" y="164" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="700" fill="#F8FAFC">Rule Catalogue + Self-Test</text>
+  <text x="159" y="188" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94A3B8">good/ &amp; bad/ fixtures verified</text>
+
+  <line x1="270" y1="174" x2="314" y2="174" stroke="#F59E0B" stroke-width="2" marker-end="url(#arrAmber)"/>
+
+  <rect x="322" y="138" width="240" height="72" rx="10" fill="#191E2F" stroke="#334155"/>
+  <text x="442" y="164" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="700" fill="#F8FAFC">Pluggable Engine Adapters</text>
+  <text x="442" y="188" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94A3B8">eslint · ruff · depcruise · custom</text>
+
+  <line x1="566" y1="174" x2="610" y2="174" stroke="#F59E0B" stroke-width="2" marker-end="url(#arrAmber)"/>
+
+  <rect x="618" y="138" width="248" height="72" rx="10" fill="#191E2F" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="742" y="164" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="800" fill="#F8FAFC">Ratchet &amp; TTL Exceptions</text>
+  <text x="742" y="188" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#FDE68A">baseline.json · approvals.yaml</text>
+
+  <line x1="870" y1="174" x2="914" y2="174" stroke="#F59E0B" stroke-width="2" marker-end="url(#arrAmber)"/>
+
+  <rect x="922" y="138" width="226" height="72" rx="10" fill="#191E2F" stroke="#334155"/>
+  <text x="1035" y="164" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="700" fill="#F8FAFC">Actionable Violations</text>
+  <text x="1035" y="188" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94A3B8">[ID] path:line — Instead: fix</text>
+
+  <!-- Plane 2 -->
+  <rect x="36" y="240" width="1128" height="136" rx="14" fill="#131724" stroke="#2E2547" stroke-width="1.5"/>
+  <rect x="52" y="254" width="372" height="24" rx="6" fill="#8B5CF6" fill-opacity="0.18" stroke="#8B5CF6" stroke-opacity="0.5"/>
+  <text x="238" y="270" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11.5" font-weight="800" fill="#DDD6FE">PLANE 2 · ADVISORY CROSS-FAMILY REVIEW (3 STAGES)</text>
+
+  <rect x="52" y="290" width="286" height="72" rx="10" fill="#191E2F" stroke="#334155"/>
+  <text x="195" y="316" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="700" fill="#F8FAFC">1. review prepare</text>
+  <text x="195" y="340" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94A3B8">Builds diff context &amp; read-only archive</text>
+
+  <line x1="342" y1="326" x2="404" y2="326" stroke="#A78BFA" stroke-width="2" marker-end="url(#arrViolet)"/>
+
+  <rect x="412" y="290" width="336" height="72" rx="10" fill="#1D1730" stroke="#8B5CF6" stroke-width="1.5"/>
+  <text x="580" y="316" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="800" fill="#F8FAFC">2. review run (Isolated · No GH Token)</text>
+  <text x="580" y="340" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#DDD6FE">Different model family audits read-only copy</text>
+
+  <line x1="752" y1="326" x2="814" y2="326" stroke="#A78BFA" stroke-width="2" marker-end="url(#arrViolet)"/>
+
+  <rect x="822" y="290" width="326" height="72" rx="10" fill="#191E2F" stroke="#334155"/>
+  <text x="985" y="316" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13.5" font-weight="700" fill="#F8FAFC">3. review validate &amp; publish</text>
+  <text x="985" y="340" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94A3B8">Schema-validated non-blocking GitHub issues</text>
+</svg>

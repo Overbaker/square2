@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="390" viewBox="0 0 1200 390" role="img" aria-label="square2: zero-dependency repo-agnostic governance skeleton combining deterministic ratcheting quality gates with advisory cross-family AI code review">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B0E14"/>
+      <stop offset="55%" stop-color="#131722"/>
+      <stop offset="100%" stop-color="#1A1525"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <radialGradient id="g1" cx="16%" cy="22%" r="48%">
+      <stop offset="0%" stop-color="#F59E0B" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#F59E0B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="g2" cx="86%" cy="22%" r="46%">
+      <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="390" rx="20" fill="url(#bg)"/>
+  <rect width="1200" height="390" rx="20" fill="url(#g1)"/>
+  <rect width="1200" height="390" rx="20" fill="url(#g2)"/>
+  <rect x="1" y="1" width="1198" height="388" rx="19" fill="none" stroke="#282E42" stroke-width="1.5"/>
+
+  <!-- Geometric square² emblem -->
+  <rect x="48" y="42" width="112" height="112" rx="24" fill="#151926" stroke="#2E3550" stroke-width="1.5"/>
+  <rect x="74" y="72" width="44" height="44" rx="8" fill="none" stroke="#F59E0B" stroke-width="3.5"/>
+  <rect x="92" y="60" width="40" height="40" rx="8" fill="#8B5CF6" fill-opacity="0.22" stroke="#A78BFA" stroke-width="3"/>
+  <text x="122" y="79" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="800" fill="#FDE68A">2</text>
+
+  <!-- Title & Tagline -->
+  <text x="184" y="86" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="800" fill="#F8FAFC" letter-spacing="-0.5">square² (方方)</text>
+  <rect x="486" y="57" width="176" height="30" rx="15" fill="url(#accent)"/>
+  <text x="574" y="77" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#FFFFFF">GATES + AI REVIEW</text>
+
+  <text x="184" y="122" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="500" fill="#CBD5E1">Zero-dependency repo governance: ratcheting deterministic gates + cross-family AI review.</text>
+
+  <!-- Pills -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="600">
+    <rect x="184" y="140" width="120" height="28" rx="14" fill="#1A2033" stroke="#334155"/>
+    <text x="244" y="159" text-anchor="middle" fill="#E2E8F0">0 Runtime Deps</text>
+    <rect x="314" y="140" width="90" height="28" rx="14" fill="#1A2033" stroke="#334155"/>
+    <text x="359" y="159" text-anchor="middle" fill="#E2E8F0">Node ≥ 22</text>
+    <rect x="414" y="140" width="124" height="28" rx="14" fill="#1A2033" stroke="#334155"/>
+    <text x="476" y="159" text-anchor="middle" fill="#E2E8F0">Ratchet Baseline</text>
+    <rect x="548" y="140" width="144" height="28" rx="14" fill="#1A2033" stroke="#334155"/>
+    <text x="620" y="159" text-anchor="middle" fill="#E2E8F0">Cross-Family LLM</text>
+    <rect x="702" y="140" width="132" height="28" rx="14" fill="#1A2033" stroke="#334155"/>
+    <text x="768" y="159" text-anchor="middle" fill="#E2E8F0">SHA-256 Vendor</text>
+  </g>
+
+  <!-- 3 KPI Cards -->
+  <rect x="48" y="210" width="352" height="138" rx="16" fill="#141825" stroke="#2A314A" stroke-width="1.5"/>
+  <rect x="48" y="210" width="352" height="4" rx="2" fill="#F59E0B"/>
+  <text x="72" y="246" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#94A3B8" letter-spacing="0.8">PLANE 1 · DETERMINISTIC GATE</text>
+  <text x="72" y="298" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="38" font-weight="800" fill="#F8FAFC">New Regressions</text>
+  <text x="72" y="328" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#94A3B8">Ratcheting baseline + TTL exceptions + Instead: fix</text>
+
+  <rect x="424" y="210" width="352" height="138" rx="16" fill="#141825" stroke="#2A314A" stroke-width="1.5"/>
+  <rect x="424" y="210" width="352" height="4" rx="2" fill="#8B5CF6"/>
+  <text x="448" y="246" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#94A3B8" letter-spacing="0.8">PLANE 2 · ADVISORY AI REVIEW</text>
+  <text x="448" y="298" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="38" font-weight="800" fill="#F8FAFC">Cross-Family</text>
+  <text x="448" y="328" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#94A3B8">3-stage isolated credentials · never blocks merges</text>
+
+  <rect x="800" y="210" width="352" height="138" rx="16" fill="#141825" stroke="#2A314A" stroke-width="1.5"/>
+  <rect x="800" y="210" width="352" height="4" rx="2" fill="#10B981"/>
+  <text x="824" y="246" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#94A3B8" letter-spacing="0.8">TRUST &amp; PORTABILITY</text>
+  <text x="824" y="298" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="38" font-weight="800" fill="#F8FAFC">0 Dependencies</text>
+  <text x="824" y="328" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#94A3B8">Vendor into tools/square2 with tree_sha256 lock</text>
+</svg>
