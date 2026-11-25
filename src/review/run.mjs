@@ -143,15 +143,66 @@ function tomlString(s) {
   return JSON.stringify(s);
 }
 
+/** Provider retries (request and stream) unless SQ2_LLM_RETRIES says otherwise. */
+export const DEFAULT_LLM_RETRIES = 20;
+export const MAX_LLM_RETRIES = 100;
+/** How long a stream may stay silent before codex gives up on it (a throttled deployment pauses). */
+export const STREAM_IDLE_TIMEOUT_MS = 600_000;
+const LOOPBACK = new Set(['127.0.0.1', '[::1]', 'localhost']);
+
 /**
- * `codex exec` arguments: read-only sandbox in the extracted tree, the Azure
- * OpenAI Responses endpoint as a custom provider via `-c` TOML overrides,
- * JSON events on stdout, the final message to `outFile`, prompt on stdin.
- * @param {{ model: string, endpoint: string, tree: string, outFile: string }} o
+ * The provider base URL: `SQ2_LLM_BASE_URL` verbatim when set (an
+ * OpenAI-compatible Responses gateway), else `<endpoint>/openai/v1`. The
+ * override must be an http(s) URL without credentials; plain http only for
+ * a loopback host (127.0.0.1, ::1, localhost). Throws RunError.
+ * @param {Record<string, string | undefined>} env
+ * @param {string} endpoint SQ2_AZURE_OPENAI_ENDPOINT
+ * @returns {string}
+ */
+export function llmBaseUrl(env, endpoint) {
+  const v = env.SQ2_LLM_BASE_URL;
+  if (v === undefined || v === '') return `${endpoint.replace(/\/+$/, '')}/openai/v1`;
+  const instead = 'set SQ2_LLM_BASE_URL to an https URL, or http://127.0.0.1:<port>/v1 for a gateway on the runner itself';
+  let url;
+  try {
+    url = new URL(v);
+  } catch {
+    throw new RunError('SQ2_LLM_BASE_URL is not a URL', instead);
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new RunError(`SQ2_LLM_BASE_URL must be http(s), not ${url.protocol.replace(/:$/, '')}`, instead);
+  if (url.protocol === 'http:' && !LOOPBACK.has(url.hostname.toLowerCase())) throw new RunError('SQ2_LLM_BASE_URL uses plain http for a host that is not loopback', instead);
+  if (url.username !== '' || url.password !== '') throw new RunError('SQ2_LLM_BASE_URL must not carry credentials', 'pass the key in SQ2_AZURE_OPENAI_API_KEY');
+  return v;
+}
+
+/**
+ * Request and stream retries from `SQ2_LLM_RETRIES` (an integer 0..100;
+ * unset or empty: 20). Throws RunError.
+ * @param {Record<string, string | undefined>} env
+ * @returns {number}
+ */
+export function llmRetries(env) {
+  const v = env.SQ2_LLM_RETRIES;
+  if (v === undefined || v.trim() === '') return DEFAULT_LLM_RETRIES;
+  const n = /^\d{1,3}$/.test(v.trim()) ? Number(v.trim()) : NaN;
+  if (!Number.isInteger(n) || n > MAX_LLM_RETRIES) throw new RunError(`SQ2_LLM_RETRIES must be an integer from 0 to ${MAX_LLM_RETRIES}, got ${JSON.stringify(v)}`, `unset it (default ${DEFAULT_LLM_RETRIES}) or pass a whole number up to ${MAX_LLM_RETRIES}`);
+  return n;
+}
+
+/**
+ * `codex exec` arguments: read-only sandbox in the extracted tree, the
+ * Responses endpoint as a custom provider via `-c` TOML overrides (the Azure
+ * endpoint, or SQ2_LLM_BASE_URL verbatim; request and stream retries and the
+ * stream idle timeout for throttled deployments), JSON events on stdout, the
+ * final message to `outFile`, prompt on stdin. Throws RunError for invalid
+ * SQ2_LLM_* settings.
+ * @param {{ model: string, endpoint: string, tree: string, outFile: string, env?: Record<string, string | undefined> }} o
  * @returns {string[]}
  */
 export function codexArgs(o) {
-  const baseUrl = `${o.endpoint.replace(/\/+$/, '')}/openai/v1`;
+  const env = o.env ?? {};
+  const baseUrl = llmBaseUrl(env, o.endpoint);
+  const retries = llmRetries(env);
   return [
     'exec',
     '--json',
@@ -164,7 +215,7 @@ export function codexArgs(o) {
     '--output-last-message', o.outFile,
     '-m', o.model,
     '-c', `model_provider=${tomlString(PROVIDER)}`,
-    '-c', `model_providers.${PROVIDER}={ name = ${tomlString(PROVIDER)}, base_url = ${tomlString(baseUrl)}, env_key = ${tomlString(KEY_VAR)}, wire_api = "responses" }`,
+    '-c', `model_providers.${PROVIDER}={ name = ${tomlString(PROVIDER)}, base_url = ${tomlString(baseUrl)}, env_key = ${tomlString(KEY_VAR)}, wire_api = "responses", request_max_retries = ${retries}, stream_max_retries = ${retries}, stream_idle_timeout_ms = ${STREAM_IDLE_TIMEOUT_MS} }`,
     '-',
   ];
 }
@@ -339,6 +390,8 @@ export async function runReview(o) {
     const callPlans = Array.isArray(o.context.calls) ? o.context.calls : [];
     const prompt = callPlans.length > 0 ? '' : prefix + read(o.context.prompt_suffix_file ?? 'prompt.suffix.md');
     if (callPlans.length === 0) writeFileSync(join(o.contextDir, 'prompt.md'), prompt);
+    // invalid SQ2_LLM_* settings fail here, before any model call
+    codexArgs({ model: o.model, endpoint: o.endpoint, tree, outFile: join(tmp, 'check.txt'), env: o.env });
     const env = codexEnv(o.env, { endpoint: o.endpoint, key: o.key, home });
     /** @type {Analysis['usage']['attempts']} */
     const attempts = [];
@@ -347,7 +400,7 @@ export async function runReview(o) {
     /** @param {string} model @param {string} text @param {string} tag */
     const ask = async (model, text, tag) => {
       const outFile = join(tmp, `${tag}.txt`);
-      const res = await spawn(o.bin, codexArgs({ model, endpoint: o.endpoint, tree, outFile }), { cwd: tree, env, input: text, timeoutMs: o.timeoutMs ?? 30 * 60_000 });
+      const res = await spawn(o.bin, codexArgs({ model, endpoint: o.endpoint, tree, outFile, env: o.env }), { cwd: tree, env, input: text, timeoutMs: o.timeoutMs ?? 30 * 60_000 });
       const answer = existsSync(outFile) ? readFileSync(outFile, 'utf8') : '';
       return { code: res.code, answer: res.code === 0 && answer.trim() !== '' ? stripFence(answer) : null, usage: parseUsage(res.stdout) };
     };

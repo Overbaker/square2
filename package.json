@@ -1,6 +1,6 @@
 {
   "name": "square2",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "square² (方方): deterministic repo gates and advisory cross-family review",
   "license": "MIT",
   "private": true,

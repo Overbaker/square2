@@ -84,7 +84,7 @@ move it. The gate (group `square2-gate-publish-<repo>`) only creates and updates
 comments on the state issue, so it can run while a review does. When both create the state issue on
 their very first run, both adopt the lower-numbered one.
 
-## Open items for v0.1.2
+## Open items for v0.1.3
 
 Escape records stay off by default until these are redesigned:
 

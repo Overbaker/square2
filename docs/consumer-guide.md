@@ -171,7 +171,7 @@ escapes:
 
 With the default `false`, `prepare` detects nothing and writes no escape data into its context, and
 `publish` creates, updates and credits nothing for escapes; the digest has no escape section. The
-design is being reworked for v0.1.2 (see [trust-model.md](trust-model.md)). When enabled, the
+design is being reworked for v0.1.3 (see [trust-model.md](trust-model.md)). When enabled, the
 daily review's `prepare` step also looks for fix commits in the reviewed range (non-merge
 commits on the branch whose subject matches `^(fix|hotfix|revert)(\(|:|\s)` or the words
 `regression`, `hotfix` or `revert`, or that carry a `Fixes-Commit: <sha>` trailer with a 7 to 40
@@ -218,10 +218,27 @@ change). square² never sets these labels. Every review digest lists the open es
 | `SQ2_AZURE_OPENAI_ENDPOINT` | variable | `https://<resource>.openai.azure.com/` |
 | `SQ2_REVIEW_MODEL` | variable | deployment name of the primary reviewer (used only when its family is the selected reviewer's) |
 | `SQ2_REVIEW_FALLBACK_MODEL` | variable | optional second deployment, same family (same rule) |
-| `SQ2_AZURE_OPENAI_API_KEY` | secret | the Azure OpenAI key (see [auth.md](auth.md)) |
+| `SQ2_AZURE_OPENAI_API_KEY` | secret | the Azure OpenAI key (see [auth.md](auth.md)); with a gateway, whatever key it expects (any non-empty value if it accepts any) |
+| `SQ2_LLM_BASE_URL` | variable | optional: an OpenAI-compatible Responses gateway, used verbatim instead of the Azure endpoint (https, or http on loopback only) |
+| `SQ2_LLM_RETRIES` | variable | optional: provider request and stream retries, 0 to 100 (default 20) |
+| `SQ2_ANALYZE_RUNS_ON` | variable | optional: JSON `runs-on` for the analyze job only, for example `["self-hosted","sq2-analyze"]` (default `ubuntu-latest`) |
 
 Set the secret from stdin so it never lands in a file or shell history:
 `gh secret set SQ2_AZURE_OPENAI_API_KEY` (paste, then Ctrl-D).
+
+### Self-hosted runner for the analyze job
+
+The analyze job can run on a self-hosted runner, for example one next to a local gateway
+(`SQ2_LLM_BASE_URL=http://127.0.0.1:<port>/v1`) or with a bigger quota. Only that job moves:
+`prepare` and `publish` hold the issues token and repository content and stay on GitHub-hosted
+`ubuntu-latest`.
+
+1. Register the runner with a dedicated label, for example `sq2-analyze`, and run it as a non-root
+   user that has no access to other repositories' credentials.
+2. Set `SQ2_ANALYZE_RUNS_ON` to `["self-hosted","sq2-analyze"]` (a JSON value; unset means
+   `ubuntu-latest`).
+3. The job installs node 22 and the pinned codex itself, needs no checkout and has
+   `permissions: {}`; `guard-env` still refuses to start if a GitHub token is in its environment.
 
 ## 8. Pilot
 

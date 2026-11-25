@@ -795,7 +795,7 @@ async function runCommand(values, io, out) {
   }
   const endpoint = io.env.SQ2_AZURE_OPENAI_ENDPOINT;
   const key = io.env.SQ2_AZURE_OPENAI_API_KEY;
-  if (!endpoint || !key) throw new CommandError(formatDiagnostic('S2-REVIEW-MODEL', 'SQ2_AZURE_OPENAI_ENDPOINT and SQ2_AZURE_OPENAI_API_KEY must be set', 'pass the endpoint variable and the key secret to this step only'));
+  if ((!endpoint && !io.env.SQ2_LLM_BASE_URL) || !key) throw new CommandError(formatDiagnostic('S2-REVIEW-MODEL', 'SQ2_AZURE_OPENAI_API_KEY and either SQ2_AZURE_OPENAI_ENDPOINT or SQ2_LLM_BASE_URL must be set', 'pass the endpoint (or gateway) variable and the key secret to this step only'));
   const envModel = ownFamilyEnv(context, 'SQ2_REVIEW_MODEL', io);
   const model = (typeof values.model === 'string' && values.model) || envModel || context.reviewer?.model;
   if (typeof model !== 'string' || model === '') throw new CommandError(formatDiagnostic('S2-REVIEW-MODEL', 'no model deployment', 'pass --model <deployment> or set SQ2_REVIEW_MODEL'));
@@ -805,7 +805,7 @@ async function runCommand(values, io, out) {
     const problem = m ? modelProblem(context, m, allow) : null;
     if (problem) throw new CommandError(formatDiagnostic('S2-REVIEW-FAMILY', problem, 'use a deployment of the selected reviewer family, or pass --allow-same-family to accept a same-family review'));
   }
-  const res = await runReview({ contextDir: paths.dir, context, model, fallback, endpoint, key, bin: io.env.SQUARE2_CODEX_BIN || 'codex', env: io.env, allowSameFamily: allow });
+  const res = await runReview({ contextDir: paths.dir, context, model, fallback, endpoint: endpoint ?? "", key, bin: io.env.SQUARE2_CODEX_BIN || 'codex', env: io.env, allowSameFamily: allow });
   if (res.usage.model_used === null) {
     out([formatDiagnostic('S2-REVIEW-MODEL', `the model step failed (${res.usage.attempts.map((a) => `${a.model}: exit ${a.exit_code}`).join(', ')})`, 'check the deployment names and the endpoint; nothing is published')]);
     stepSummary(io, renderStepSummary({ status: 'review-error', errors: ['model step failed'] }));

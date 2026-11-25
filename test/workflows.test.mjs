@@ -143,7 +143,12 @@ test('P19: the analyze job has permissions: {}, no checkout, no GitHub token; gu
   assert.ok(guard >= 0 && model > guard, 'guard-env before review run');
   assert.ok(runs.some((r) => /npm install --global --ignore-scripts @openai\/codex@0\.171\.0$/.test(r.trim())), 'pinned codex');
   const run = steps(a)[model];
-  assert.deepEqual(Object.keys(run.env).sort(), ['SQ2_AZURE_OPENAI_API_KEY', 'SQ2_AZURE_OPENAI_ENDPOINT', 'SQ2_REVIEW_FALLBACK_MODEL', 'SQ2_REVIEW_MODEL']);
+  assert.deepEqual(Object.keys(run.env).sort(), ['SQ2_AZURE_OPENAI_API_KEY', 'SQ2_AZURE_OPENAI_ENDPOINT', 'SQ2_LLM_BASE_URL', 'SQ2_LLM_RETRIES', 'SQ2_REVIEW_FALLBACK_MODEL', 'SQ2_REVIEW_MODEL']);
+  assert.equal(run.env.SQ2_LLM_BASE_URL, '${{ vars.SQ2_LLM_BASE_URL }}');
+  assert.equal(run.env.SQ2_LLM_RETRIES, '${{ vars.SQ2_LLM_RETRIES }}');
+  assert.equal(a['runs-on'], "${{ vars.SQ2_ANALYZE_RUNS_ON != '' && fromJSON(vars.SQ2_ANALYZE_RUNS_ON) || 'ubuntu-latest' }}", 'only analyze may move to a self-hosted runner');
+  assert.equal(review.jobs.prepare['runs-on'], 'ubuntu-latest');
+  assert.equal(review.jobs.publish['runs-on'], 'ubuntu-latest');
   assert.equal(run.env.SQ2_AZURE_OPENAI_API_KEY, '${{ secrets.SQ2_AZURE_OPENAI_API_KEY }}');
   assert.equal(run.env.SQ2_AZURE_OPENAI_ENDPOINT, '${{ vars.SQ2_AZURE_OPENAI_ENDPOINT }}');
   assert.equal(a.if, "needs.prepare.outputs.skip == 'false'");

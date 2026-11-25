@@ -8,7 +8,12 @@ through a model provider override, with the Responses API.
 `square2 review run` starts `codex exec` with:
 
 - `-c model_provider="sq2azure"` and
-  `-c model_providers.sq2azure={ name = "sq2azure", base_url = "<SQ2_AZURE_OPENAI_ENDPOINT>/openai/v1", env_key = "SQ2_AZURE_OPENAI_API_KEY", wire_api = "responses" }`;
+  `-c model_providers.sq2azure={ name = "sq2azure", base_url = "<base url>", env_key = "SQ2_AZURE_OPENAI_API_KEY", wire_api = "responses", request_max_retries = <n>, stream_max_retries = <n>, stream_idle_timeout_ms = 600000 }`.
+  The base URL is `<SQ2_AZURE_OPENAI_ENDPOINT>/openai/v1`, or `SQ2_LLM_BASE_URL` verbatim when that
+  is set (see below). `<n>` is `SQ2_LLM_RETRIES` (an integer from 0 to 100, default 20): a deployment
+  with a low tokens-per-minute quota throttles codex's multi-turn loop, and the default of a few
+  retries gives up too early. The 10-minute stream idle timeout covers a throttled stream that
+  pauses;
 - `-m <deployment>`: `--model`, else `SQ2_REVIEW_MODEL`, else the selected reviewer's model. The
   variable overrides the model only when it belongs to the selected reviewer's family (a configured
   `reviewers` entry with that deployment, else the family name map); otherwise it is ignored with a
@@ -30,6 +35,24 @@ family must be listed under `reviewers` in `.square2/config.yaml`).
 
 Local pilot: export the same two variables in the shell for one command; the key is read from the
 environment only.
+
+## An OpenAI-compatible gateway instead of Azure
+
+Set `SQ2_LLM_BASE_URL` to a gateway that serves the OpenAI Responses API, for example
+`http://127.0.0.1:3425/v1` for a gateway on the runner itself. It is used verbatim as the provider
+`base_url`. It must be an `https://` URL; plain `http://` is accepted only for a loopback host
+(`127.0.0.1`, `::1`, `localhost`), and a URL with credentials is refused. A bad value fails
+`review run` with exit 2 before any model call.
+
+- The key is still read from `SQ2_AZURE_OPENAI_API_KEY` and sent as the bearer token. A gateway
+  that does its own upstream auth may accept any non-empty value; set the secret anyway.
+- `review run` still requires `SQ2_AZURE_OPENAI_ENDPOINT` to be set. It is not used for the
+  requests when `SQ2_LLM_BASE_URL` is set; any https URL (for example the gateway's own) works.
+- The model names (`SQ2_REVIEW_MODEL`, `reviewers[].model`) are whatever the gateway calls its
+  models, and the family rule still applies: list a deployment whose name does not show its
+  family under `reviewers`.
+- A loopback gateway needs the analyze job on a runner where the gateway runs: see "Self-hosted
+  runner for the analyze job" in [consumer-guide.md](consumer-guide.md).
 
 ## Key rotation
 

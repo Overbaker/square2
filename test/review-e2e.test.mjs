@@ -106,7 +106,7 @@ test('review end to end: prepare → run (fake codex) → validate → publish, 
     assert.ok(o.stdinPrompt && o.promptHasRangeMarker);
     for (const flag of ['--skip-git-repo-check', '--json', '--ignore-user-config', '--ignore-rules', '--ephemeral']) assert.ok(o.args.includes(flag), flag);
     assert.ok(o.home && o.home === o.codexHome && o.home !== process.env.HOME, 'a fresh CODEX_HOME is also HOME');
-    assert.deepEqual(o.configs, ['model_provider="sq2azure"', 'model_providers.sq2azure={ name = "sq2azure", base_url = "https://example.invalid/openai/v1", env_key = "SQ2_AZURE_OPENAI_API_KEY", wire_api = "responses" }']);
+    assert.deepEqual(o.configs, ['model_provider="sq2azure"', 'model_providers.sq2azure={ name = "sq2azure", base_url = "https://example.invalid/openai/v1", env_key = "SQ2_AZURE_OPENAI_API_KEY", wire_api = "responses", request_max_retries = 20, stream_max_retries = 20, stream_idle_timeout_ms = 600000 }']);
     assert.ok(o.envKeys.includes('SQ2_AZURE_OPENAI_API_KEY') && o.envKeys.includes('SQ2_AZURE_OPENAI_ENDPOINT'));
     assert.deepEqual(o.envKeys.filter((/** @type {string} */ k) => /^(GITHUB_|GH_|ACTIONS_)|NODE_OPTIONS|^OPENAI_API_KEY$|^SQUARE2_/.test(k)), []);
     assert.equal(existsSync(o.tree), false, 'the temporary tree is removed after the run');
@@ -184,7 +184,7 @@ test('review run: both models failing exits 2; missing LLM settings exit 2', asy
   assert.match(both.stdout, /^\[S2-REVIEW-MODEL\] the model step failed \(gpt-broken: exit 3\)/);
   const noKey = await cli(['review', 'run', '--context', ctxDir], { cwd: dir, env: { PATH: process.env.PATH } });
   assert.equal(noKey.code, 2);
-  assert.match(noKey.stdout, /SQ2_AZURE_OPENAI_ENDPOINT and SQ2_AZURE_OPENAI_API_KEY must be set/);
+  assert.match(noKey.stdout, /SQ2_AZURE_OPENAI_API_KEY and either SQ2_AZURE_OPENAI_ENDPOINT or SQ2_LLM_BASE_URL must be set/);
   const missingBin = await cli(['review', 'run', '--context', ctxDir], { cwd: dir, env: { ...env, SQUARE2_CODEX_BIN: join(fakeDir, 'nope') } });
   assert.equal(missingBin.code, 2);
   assert.match(missingBin.stdout, /^\[S2-REVIEW-MODEL\] cannot run .*nope: not found — Instead: install the codex CLI/);

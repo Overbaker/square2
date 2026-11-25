@@ -92,6 +92,10 @@ Engines: `depcruise` and `eslint` run the repository's own installed tools; `ruf
 
 ## Changes
 
+- **0.1.2**: `SQ2_LLM_BASE_URL` routes the analysis through an OpenAI-compatible Responses gateway
+  (https, or http on loopback only); provider request and stream retries (`SQ2_LLM_RETRIES`, default
+  20) and a 10-minute stream idle timeout for throttled deployments; the analyze job can run on a
+  self-hosted runner (`SQ2_ANALYZE_RUNS_ON`). The escape-record redesign moves to 0.1.3.
 - **0.1.1**: configurable author, change-id and provenance trailers (`review.*_trailers`); commit
   trailers outside that allow-list never reach the review context or prompts; the model override
   (`SQ2_REVIEW_MODEL`) applies only within the selected reviewer's family; the pre-push hook skips
