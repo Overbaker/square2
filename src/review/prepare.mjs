@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { reviewMapProblems } from '../cli/config.mjs';
 import { loadRepo } from '../cli/load.mjs';
 import { archiveTree } from '../git/archive.mjs';
 import { changedLines, changedLinesFromJSON, changedLinesToJSON, shownLines } from '../git/changed-lines.mjs';
@@ -10,7 +11,8 @@ import { blobSizes, commitPatch, commitPaths, commitsInRange, diffSections, isAn
 import { git, runGit } from '../git/exec.mjs';
 import { parseTrailers } from '../git/trailers.mjs';
 import { VERSION } from '../cli/version.mjs';
-import { authorFamilies, selectReviewer } from './family.mjs';
+import { detectEscapes, redactTrailerValues, safeTrailers } from '../issues/escape.mjs';
+import { DEFAULT_AUTHOR_TRAILERS, DEFAULT_FAMILIES, authorFamilies, selectReviewer } from './family.mjs';
 import { groupCommits } from './group.mjs';
 import { inputId } from './input-id.mjs';
 import { policyDigest } from './policy-digest.mjs';
@@ -57,12 +59,17 @@ export const STATE_FALLBACK_HOURS = 24;
  * @property {string[]} review_exclude globs left out of the review (plus the defaults and `generated`)
  * @property {'en' | 'zh' | 'auto'} language
  * @property {string[]} triage_patterns
+ * @property {string[]} [author_trailers] trailers whose values name the writers (`review.author_trailers`, default Co-Authored-By)
+ * @property {string[]} [change_id_trailers] trailers whose value is a change id (`review.change_id_trailers`, default none)
+ * @property {boolean} [escapes_enabled] escape records (`escapes.enabled`, experimental, default false)
+ * @property {string[]} [provenance_trailers] further trailers shown on escape records, for example a reviewer trailer (`review.provenance_trailers`, default none)
  */
 
 /**
  * Review settings from `.square2/config.yaml` (keys `reviewers` or
  * `reviewer: family/provider/model`, `risk_paths`, `max_findings`,
- * `max_input_tokens`, `review_exclude`, `generated`, `language`, `triage_patterns`).
+ * `max_input_tokens`, `review_exclude`, `generated`, `language`, `triage_patterns`,
+ * and the `review` map with `author_trailers`, `change_id_trailers` and `provenance_trailers`).
  * @param {Record<string, unknown>} raw
  * @returns {{ config: ReviewConfig, errors: string[] }}
  */
@@ -97,6 +104,22 @@ export function reviewConfig(raw) {
   for (const key of ['risk_paths', 'triage_patterns', 'review_exclude', 'generated']) {
     if (raw[key] !== undefined && raw[key] !== null && !strings(raw[key])) errors.push(`${key} must be a list of strings`);
   }
+  /** @type {Record<string, unknown>} */
+  let review = {};
+  for (const p of reviewMapProblems(raw.review)) errors.push(`${p.detail} (Instead: ${p.instead})`);
+  if (raw.review && typeof raw.review === 'object' && !Array.isArray(raw.review)) review = /** @type {Record<string, unknown>} */ (raw.review);
+  const trailerKey = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
+  /** @param {string} key @param {readonly string[]} def @returns {string[]} */
+  const trailerList = (key, def) => {
+    const v = review[key];
+    if (v === undefined || v === null) return [...def];
+    if (Array.isArray(v) && v.every((x) => typeof x === 'string' && trailerKey.test(x.trim()))) return v.map((x) => x.trim());
+    errors.push(`review.${key} must be a list of trailer keys`);
+    return [...def];
+  };
+  const author_trailers = trailerList('author_trailers', DEFAULT_AUTHOR_TRAILERS);
+  const change_id_trailers = trailerList('change_id_trailers', []);
+  const provenance_trailers = trailerList('provenance_trailers', []);
   return {
     config: {
       reviewers,
@@ -107,9 +130,46 @@ export function reviewConfig(raw) {
       review_exclude: [...(strings(raw.generated) ? /** @type {string[]} */ (raw.generated) : []), ...(strings(raw.review_exclude) ? /** @type {string[]} */ (raw.review_exclude) : [])],
       language: /** @type {'en' | 'zh' | 'auto'} */ (language === 'en' || language === 'zh' ? language : 'auto'),
       triage_patterns: strings(raw.triage_patterns) ? /** @type {string[]} */ (raw.triage_patterns) : [],
+      author_trailers,
+      change_id_trailers,
+      provenance_trailers,
+      escapes_enabled: raw.escapes !== null && typeof raw.escapes === 'object' && /** @type {any} */ (raw.escapes).enabled === true,
     },
     errors,
   };
+}
+
+/**
+ * A commit message as the review may see it: subject and body text kept;
+ * in the trailer paragraph (a final paragraph of `Key: value` lines only)
+ * only the allow-listed trailers stay (author,
+ * change-id with a valid id, provenance), secret-shaped values redacted.
+ * Every other trailer line is removed (an emptied paragraph goes too).
+ * @param {string} message
+ * @param {readonly string[]} keep trailer keys to keep
+ * @param {readonly string[]} [changeIds] the change-id trailer keys among them
+ * @returns {string}
+ */
+export function stripTrailers(message, keep, changeIds = []) {
+  const text = message.replace(/\r\n?/g, '\n').replace(/\s+$/, '');
+  const paragraphs = text.split(/\n[ \t]*\n/);
+  if (paragraphs.length < 2) return text;
+  const last = paragraphs[paragraphs.length - 1].split('\n').filter((l) => l.trim() !== '');
+  const shape = /^([A-Za-z0-9][A-Za-z0-9-]*)\s*:\s*(.+)$/;
+  // a trailer block is a final paragraph made only of `Key: value` lines; prose stays untouched
+  if (last.length === 0 || !last.every((l) => shape.test(l.trim()))) return text;
+  /** @type {string[]} */
+  const kept = [];
+  let trailers = 0;
+  for (const line of last) {
+    const m = /** @type {RegExpExecArray} */ (shape.exec(line.trim()));
+    trailers++;
+    const safe = safeTrailers([{ key: m[1], value: m[2].trim() }], keep, changeIds).filter((t) => t.key.toLowerCase() !== 'fixes-commit' || keep.some((k) => k.toLowerCase() === 'fixes-commit'));
+    if (safe.length > 0) kept.push(`${safe[0].key}: ${safe[0].value}`);
+  }
+  if (trailers === 0) return text;
+  const body = paragraphs.slice(0, -1);
+  return (kept.some((l) => l.trim() !== '') ? [...body, kept.join('\n')] : body).join('\n\n');
 }
 
 /**
@@ -220,7 +280,7 @@ export function detectLanguage(texts) {
  *   candidateTargets?: import('./candidate.mjs').ConfirmedFinding[],
  *   rules?: { id: string, engine: string, scope: string[] }[],
  * }} input
- * @returns {Promise<PreparedReview | { skip: true, reason: string, range: { from_sha: string | null, to_sha: string, branch_or_pr: string }, skip_kind?: 'budget', not_reviewed?: { group: string, reason: string }[] }>}
+ * @returns {Promise<PreparedReview | { skip: true, reason: string, range: { from_sha: string | null, to_sha: string, branch_or_pr: string }, skip_kind?: 'budget', not_reviewed?: { group: string, reason: string }[], escapes?: import('../issues/escape.mjs').Escape[] }>}
  */
 export async function prepareReview(input) {
   const dir = input.repoRoot;
@@ -245,8 +305,13 @@ export async function prepareReview(input) {
   const branch_or_pr = input.pr ? `pr:${input.pr.number}` : `branch:${input.branch ?? 'HEAD'}`;
   const range = { from_sha: from, to_sha: to, branch_or_pr };
   if (from === to) return { skip: true, reason: 'no new commits since the last review', range };
-  const commits = await commitsInRange(dir, from, to);
-  if (commits.length === 0) return { skip: true, reason: 'no commits in the range', range };
+  const rawCommits = await commitsInRange(dir, from, to);
+  if (rawCommits.length === 0) return { skip: true, reason: 'no commits in the range', range };
+  // trailers beyond the allow-listed ones never reach the context or a prompt
+  const shownTrailers = [...(input.config.author_trailers ?? DEFAULT_AUTHOR_TRAILERS), ...(input.config.change_id_trailers ?? []), ...(input.config.provenance_trailers ?? [])];
+  const changeIdKeys = input.config.change_id_trailers ?? [];
+  const rawMessage = new Map(rawCommits.map((c) => [c.sha, c.message]));
+  const commits = rawCommits.map((c) => ({ ...c, message: stripTrailers(c.message, shownTrailers, changeIdKeys) }));
 
   const firstParent = await commitsInRange(dir, from, to, { firstParent: true });
   /** @type {Map<string, string[]>} */
@@ -258,14 +323,16 @@ export async function prepareReview(input) {
   }
   const withPaths = [];
   for (const c of commits) withPaths.push({ ...c, paths: await commitPaths(dir, c) });
-  const groups = groupCommits({ commits: withPaths, merges, riskPaths: input.config.risk_paths });
+  const groups = groupCommits({ commits: withPaths, merges, riskPaths: input.config.risk_paths, changeIdTrailers: input.config.change_id_trailers ?? [] });
 
   const excludes = [...DEFAULT_REVIEW_EXCLUDES, ...input.config.review_exclude];
   const status = await nameStatus(dir, from, to);
   const excludedPaths = [...status.keys()].filter((p) => excludes.some((g) => globMatch(g, p))).sort();
   const sizes = await blobSizes(dir, to, excludedPaths.filter((p) => status.get(p)?.status !== 'D'));
   const excluded = excludedPaths.map((p) => ({ path: p, bytes: sizes.get(p) ?? 0 }));
-  const family = authorFamilies(commits);
+  const family = authorFamilies(commits, DEFAULT_FAMILIES, input.config.author_trailers ?? DEFAULT_AUTHOR_TRAILERS);
+  const escapesOn = input.config.escapes_enabled === true;
+  const escapes = !escapesOn || input.pr ? [] : detectEscapes({ commits: withPaths.map((c) => ({ ...c, message: rawMessage.get(c.sha) ?? c.message })), excludes, trailers: shownTrailers, changeIdTrailers: changeIdKeys });
   const { reviewer, sameFamily } = selectReviewer(input.config.reviewers, family);
   const policy_digest = policyDigest(input.policy);
   const input_id = inputId({ ...range, policy_digest, reviewer_family: reviewer.family, model: reviewer.model });
@@ -299,7 +366,7 @@ export async function prepareReview(input) {
     const planned = await planCalls({ dir, groups, shaOf, excludes, config: input.config, stats: planStats, render: (focus, diff, listed, omitted) =>
       buildCallPrompt({ policy: input.policy, range, treeDir, groups, commits, stats: planStats, focus, diff, listed, notReviewed: omitted, openIssues }).suffix, prefixTokens: estimateTokens(promptPrefix(input.policy)) });
     if (planned.calls.length === 0) {
-      return { skip: true, reason: 'no group fits the input budget, even with a trimmed diff (raise max_input_tokens or narrow the range)', range, skip_kind: 'budget', not_reviewed: planned.notReviewed };
+      return { skip: true, reason: 'no group fits the input budget, even with a trimmed diff (raise max_input_tokens or narrow the range)', range, skip_kind: 'budget', not_reviewed: planned.notReviewed, ...(escapesOn ? { escapes } : {}) };
     }
     calls.push(...planned.calls);
     notReviewed = planned.notReviewed;
@@ -338,7 +405,7 @@ export async function prepareReview(input) {
     author_families: family,
     language,
     groups: groups.map((g) => ({ ...g, shown: shownIds.has(g.id) })),
-    commits: withPaths.map((c) => ({ sha: c.sha, parents: c.parents, subject: c.message.split('\n')[0], message: c.message, trailers: parseTrailers(c.message), paths: c.paths })),
+    commits: withPaths.map((c) => ({ sha: c.sha, parents: c.parents, subject: c.message.split('\n')[0], message: redactTrailerValues(c.message), trailers: safeTrailers(parseTrailers(c.message), shownTrailers, changeIdKeys), paths: c.paths })),
     reviewers: input.config.reviewers,
     diff_mode: diffMode,
     not_reviewed: notReviewed,
@@ -347,6 +414,7 @@ export async function prepareReview(input) {
     estimated_tokens: tokens,
     changed_lines: changedLinesToJSON(lines),
     open_issues: openIssues,
+    ...(escapesOn ? { escapes } : {}),
     caps: { max_findings: input.config.max_findings, max_input_tokens: input.config.max_input_tokens, max_calls_per_run: input.config.max_calls_per_run },
     calls: calls.map((c) => ({ id: c.id, group: c.group, commits: c.commits, trimmed: c.trimmed, partial: c.partial, tokens: c.tokens, shown_files: c.shown_files, listed: c.listed, changed_lines: c.commit_lines, prompt_suffix_file: null })),
     tree_dir: treeDir,
@@ -719,6 +787,6 @@ export async function prepare(opts) {
     candidateTargets: opts.candidateTargets,
     rules: repo.catalogue.rules.map((r) => ({ id: r.id, engine: r.engine, scope: r.scope })),
   });
-  if (res.skip) return { schema_version: 2, skip: true, reason: res.reason, range: res.range, branch, skip_kind: 'skip_kind' in res ? res.skip_kind : 'empty', not_reviewed: 'not_reviewed' in res ? res.not_reviewed : [] };
+  if (res.skip) return { schema_version: 2, skip: true, reason: res.reason, range: res.range, branch, skip_kind: 'skip_kind' in res ? res.skip_kind : 'empty', not_reviewed: 'not_reviewed' in res ? res.not_reviewed : [], ...('escapes' in res && res.escapes ? { escapes: res.escapes } : {}) };
   return { ...res.context, branch };
 }

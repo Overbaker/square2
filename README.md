@@ -60,9 +60,30 @@ engines:
     config: .dependency-cruiser.cjs
   eslint:
     config: eslint.config.mjs
+escapes:
+  enabled: false            # experimental escape records (default false)
+review:
+  author_trailers:          # trailers naming the writers (default Co-Authored-By)
+    - Co-Authored-By
+    - X-Writers
+  change_id_trailers:       # trailers whose value is a change id (default none)
+    - X-Change
+  provenance_trailers:      # further trailers shown on escape records (default none)
+    - X-Reviewers
 ```
 
+Escape records (experimental, off by default; `escapes.enabled: true`): fix commits on the reviewed branch become `square2:escape` issues (one per fix sha, no model call); a fix that closes a gate or review issue credits that issue instead. See docs/consumer-guide.md.
+
 Engines: `depcruise` and `eslint` run the repository's own installed tools; `ruff` runs the configured command; `suppressions` is built in; `command` runs `options.argv` (with `{root}` replaced by the tree to scan) and reads one JSON object per line: `{"path": "src/a.ts", "line": 3, "subject": "what is wrong"}`.
+
+## Changes
+
+- **0.1.1**: configurable author, change-id and provenance trailers (`review.*_trailers`); commit
+  trailers outside that allow-list never reach the review context or prompts; the model override
+  (`SQ2_REVIEW_MODEL`) applies only within the selected reviewer's family; the pre-push hook skips
+  checkouts without `tools/square2`; escape records added as an experimental feature, off by default
+  (`escapes.enabled`), to be redesigned in 0.1.2.
+- **0.1.0**: first release.
 
 ## Vendoring
 

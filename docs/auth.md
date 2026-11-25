@@ -9,8 +9,11 @@ through a model provider override, with the Responses API.
 
 - `-c model_provider="sq2azure"` and
   `-c model_providers.sq2azure={ name = "sq2azure", base_url = "<SQ2_AZURE_OPENAI_ENDPOINT>/openai/v1", env_key = "SQ2_AZURE_OPENAI_API_KEY", wire_api = "responses" }`;
-- `-m <deployment>`: `--model`, else `SQ2_REVIEW_MODEL`, else the configured reviewer; on failure it
-  retries once with `--fallback-model` / `SQ2_REVIEW_FALLBACK_MODEL`;
+- `-m <deployment>`: `--model`, else `SQ2_REVIEW_MODEL`, else the selected reviewer's model. The
+  variable overrides the model only when it belongs to the selected reviewer's family (a configured
+  `reviewers` entry with that deployment, else the family name map); otherwise it is ignored with a
+  notice and the selected reviewer's model is used. On failure it retries once with
+  `--fallback-model` / `SQ2_REVIEW_FALLBACK_MODEL` (same family rule);
 - `--ignore-user-config --ignore-rules --ephemeral --sandbox read-only`, a fresh `CODEX_HOME`, and an
   environment that contains the key and the endpoint and nothing else secret.
 

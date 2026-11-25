@@ -57,6 +57,19 @@ export function capText(text, max) {
   return `${text.slice(0, max)}… [truncated ${cut} characters]`;
 }
 
+/**
+ * capText for text that will be published: the secret check runs on the
+ * whole text first (a secret cut in half by the cap would no longer match),
+ * then it is truncated. Throws SecretError.
+ * @param {string} text
+ * @param {number} max
+ * @returns {string}
+ */
+export function capChecked(text, max) {
+  if (looksSecret(text)) throw new SecretError('text contains a secret-shaped string');
+  return capText(text, max);
+}
+
 export class SecretError extends Error {}
 
 /**
@@ -182,6 +195,7 @@ export const sanitize = escapeMd;
  * @returns {string}
  */
 export function sanitizeCode(text) {
+  if (looksSecret(text)) throw new SecretError('text contains a secret-shaped string');
   return escapeMd(text.replace(/[\r\n]+/g, ' ').slice(0, 300));
 }
 
@@ -235,8 +249,13 @@ const LABELS = /** @type {const} */ ({
     moreItems: (/** @type {number} */ n) => `(${n} more questions, suggestions or notes not shown)`,
     digestTruncated: (/** @type {number} */ n) => `… [digest truncated: ${n} characters]`,
     usage: 'Usage', tokens: 'tokens', input: 'input', cached: 'cached', output: 'output', cost: 'estimated cost',
-    overflow: (/** @type {number} */ n, /** @type {number} */ cap) => `square²: ${n} finding(s) not filed because the run reached max_new_issues_per_run (${cap}):`,
+    overflow: (/** @type {number} */ n, /** @type {number} */ cap, /** @type {number} */ remaining) => `square²: ${n} item(s) not filed because the run reached max_new_issues_per_run (configured: ${cap}; remaining for findings after escapes: ${remaining}):`,
     candidate: (/** @type {string} */ id, /** @type {string} */ label) => `Rule candidate \`${id}\` (label ${label}; never enabled automatically). Replay: fires on born_from, not on its parent.`,
+    credited: 'credited: fixed by',
+    escapeIntro: 'Escape record: a fix commit on the integration branch that no earlier layer caught.',
+    escapeClassify: 'Classify by adding one `layer:<name>` label (for example layer:gate, layer:tests, layer:review or layer:human) and record the follow-up. square² never sets it.',
+    trailers: 'Trailers', files: 'Changed files',
+    escapes: 'Escapes awaiting classification',
   },
   zh: {
     severity: '严重程度', location: '位置', symbol: '符号', range: '范围', group: '分组', commit: '提交',
@@ -252,8 +271,13 @@ const LABELS = /** @type {const} */ ({
     moreItems: (/** @type {number} */ n) => `（另有 ${n} 条问题、建议或备注未显示）`,
     digestTruncated: (/** @type {number} */ n) => `…［摘要已截断：${n} 个字符］`,
     usage: '用量', tokens: '令牌', input: '输入', cached: '缓存', output: '输出', cost: '估算费用',
-    overflow: (/** @type {number} */ n, /** @type {number} */ cap) => `square²：本次运行达到 max_new_issues_per_run（${cap}），${n} 个发现未建议题：`,
+    overflow: (/** @type {number} */ n, /** @type {number} */ cap, /** @type {number} */ remaining) => `square²：本次运行达到 max_new_issues_per_run（配置：${cap}；逃逸记录之后剩余给发现的额度：${remaining}），${n} 项未建议题：`,
     candidate: (/** @type {string} */ id, /** @type {string} */ label) => `规则候选 \`${id}\`（标签 ${label}；不会自动启用）。回放：在 born_from 触发，在父提交上不触发。`,
+    credited: 'credited: fixed by',
+    escapeIntro: '逃逸记录：集成分支上的修复提交，此前各层均未发现。',
+    escapeClassify: '请添加一个 `layer:<name>` 标签（例如 layer:gate、layer:tests、layer:review 或 layer:human）进行分类并记录后续措施。square² 从不设置该标签。',
+    trailers: 'Trailers', files: '变更文件',
+    escapes: 'Escapes awaiting classification',
   },
 });
 
@@ -343,7 +367,7 @@ function rangeText(r) {
 export function renderReviewIssue(f, ctx) {
   const t = L(ctx.language);
   const commit = f.commit ?? ctx.range.to_sha ?? '';
-  const cap = (/** @type {string | undefined} */ v, /** @type {number} */ n) => sanitize(capText(v ?? '', n));
+  const cap = (/** @type {string | undefined} */ v, /** @type {number} */ n) => sanitize(capChecked(v ?? '', n));
   const lines = [
     `_${t.advisory}_`,
     '',
@@ -357,7 +381,7 @@ export function renderReviewIssue(f, ctx) {
     if (f.evidence.length > MAX_EVIDENCE_ITEMS) ev.push(`- … [${f.evidence.length - MAX_EVIDENCE_ITEMS} more evidence items truncated]`);
     lines.push('', `### ${t.evidence}`, '', ...ev);
   }
-  return { title: clip(titleText(capText(f.title, FIELD_CAPS.title)), FIELD_CAPS.title + 40), body: capBody(`${lines.join('\n')}\n`), labels: ['square2', 'square2:review', `sev:${f.severity.toLowerCase()}`] };
+  return { title: clip(titleText(capChecked(f.title, FIELD_CAPS.title)), FIELD_CAPS.title + 40), body: capBody(`${lines.join('\n')}\n`), labels: ['square2', 'square2:review', `sev:${f.severity.toLowerCase()}`] };
 }
 
 /**
@@ -378,8 +402,8 @@ export function capBody(body) {
 export function renderSeenAgain(f, ctx) {
   const t = L(ctx.language);
   const parts = [`${t.seen} ${rangeText(ctx.range)} @ ${shaText(ctx.commit)}.`];
-  if (typeof f.body === 'string' && f.body.trim() !== '') parts.push(sanitize(capText(f.body, FIELD_CAPS.body)));
-  parts.push(`**${t.failure}:** ${sanitize(capText(f.failure_case ?? '', FIELD_CAPS.failure_case))}`);
+  if (typeof f.body === 'string' && f.body.trim() !== '') parts.push(sanitize(capChecked(f.body, FIELD_CAPS.body)));
+  parts.push(`**${t.failure}:** ${sanitize(capChecked(f.failure_case ?? '', FIELD_CAPS.failure_case))}`);
   return capBody(`${parts.join('\n\n')}\n`);
 }
 
@@ -411,6 +435,83 @@ export function renderResolved(sha, evidence, language) {
     }
   });
   return `${L(language).resolved} ${plainSha(sha)}${safe.length ? `\n\n${safe.join('\n')}` : ''}\n`;
+}
+
+/**
+ * Comment on a gate or review issue whose finding a fix commit addressed.
+ * @param {string} sha
+ * @param {'en' | 'zh'} [language]
+ * @returns {string}
+ */
+export function renderCredited(sha, language) {
+  return `${L(language).credited} ${plainSha(sha)}\n`;
+}
+
+/** Shown in place of commit text that looks like a secret. */
+export const REDACTED = '<redacted>';
+
+/**
+ * True when commit text looks like a secret, checked the way model text is
+ * (NFKC, format characters stripped, joined neighbouring words) on the text
+ * itself, on its `key: value` line, and on its separator-free form.
+ * @param {string} value
+ * @param {string} [key]
+ * @returns {boolean}
+ */
+export function commitTextSecret(value, key) {
+  const v = normalizeForSecrets(value);
+  const candidates = [value, v, v.replace(/[\s\-_.:/\\]+/g, '')];
+  if (key !== undefined) candidates.push(`${key}: ${value}`, `${normalizeForSecrets(key)}: ${v}`);
+  return candidates.some((t) => looksSecret(t));
+}
+
+/**
+ * Title and body (without the markers) of an escape record: a fix commit no
+ * earlier layer caught. The layer stays unclassified until a human sets a
+ * `layer:*` label. Only the trailers passed in are shown (the caller
+ * allow-lists them); every commit string is escaped, and secret-shaped text
+ * is replaced by `<redacted>`.
+ * @param {{ fix_sha: string, subject: string, introducing: string, files: string[], trailers: { key: string, value: string }[] }} e
+ * @param {'en' | 'zh'} [language]
+ * @returns {{ title: string, body: string }}
+ */
+export function renderEscapeIssue(e, language) {
+  const t = L(language);
+  /**
+   * The whole value is checked before it is truncated; a secret anywhere in it redacts the field.
+   * @param {string} value @param {(v: string) => string} show @param {number} [max] @param {string} [key]
+   */
+  const safe = (value, show, max, key) => {
+    if (value === REDACTED || commitTextSecret(value, key)) return REDACTED;
+    try {
+      return show(max === undefined ? value : capText(value, max));
+    } catch (err) {
+      if (err instanceof SecretError) return REDACTED;
+      throw err;
+    }
+  };
+  const subjectText = e.subject.replace(/\r/g, '');
+  const subject = safe(subjectText, titleText, FIELD_CAPS.title);
+  const lines = [
+    `_${t.escapeIntro}_`,
+    '',
+    `- fix: ${shaText(e.fix_sha)}`,
+    `- introducing: ${/^[0-9a-f]{7,40}$/.test(e.introducing) ? shaText(e.introducing) : 'unknown'}`,
+    `- layer: unclassified`,
+    `- subject: ${safe(subjectText, escapeMd, FIELD_CAPS.title)}`,
+  ];
+  if (e.trailers.length > 0) {
+    lines.push('', `### ${t.trailers}`, '');
+    for (const tr of e.trailers.slice(0, 20)) {
+      const key = /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(tr.key) ? tr.key : REDACTED;
+      lines.push(`- ${key}: ${safe(tr.value.replace(/\r/g, ''), escapeMd, 300, tr.key)}`);
+    }
+  }
+  lines.push('', `### ${t.files}`, '');
+  for (const f of e.files.slice(0, 200)) lines.push(`- ${safe(f, sanitizeCode)}`);
+  if (e.files.length > 200) lines.push(`- … [${e.files.length - 200} more files]`);
+  lines.push('', t.escapeClassify);
+  return { title: clip(`escape: ${subject}`, FIELD_CAPS.title + 40), body: capBody(`${lines.join('\n')}\n`) };
 }
 
 /**
@@ -506,6 +607,7 @@ export function estimateCost(usage, pricePerMillion) {
  * @property {boolean} [sameFamily]
  * @property {Usage | null} [usage]
  * @property {{ amount: number, currency: string } | null} [cost]
+ * @property {{ number: number, url: string, title: string }[]} [escapes] open escape issues without a `layer:*` label
  */
 
 /**
@@ -523,7 +625,7 @@ export function digestMarker(inputId) {
 function safeList(xs) {
   return xs.flatMap((x) => {
     try {
-      return [`- ${sanitize(capText(String(x), DIGEST_ITEM_CHARS)).replace(/\s+/g, ' ')}`];
+      return [`- ${sanitize(capChecked(String(x), DIGEST_ITEM_CHARS)).replace(/\s+/g, ' ')}`];
     } catch {
       return [];
     }
@@ -570,13 +672,16 @@ export function renderDigest(d) {
   if (ns.length > 0) {
     lines.push('', `**${t.notes}**`, ...ns.flatMap((n) => {
       try {
-        return [`- ${sanitizeCode(String(n.severity))} ${sanitizeCode(`${n.path}:${n.line}`)}: ${escapeMd(capText(String(n.title).replace(/\s+/g, ' '), DIGEST_ITEM_CHARS))}`];
+        return [`- ${sanitizeCode(String(n.severity))} ${sanitizeCode(`${n.path}:${n.line}`)}: ${escapeMd(capChecked(String(n.title).replace(/\s+/g, ' '), DIGEST_ITEM_CHARS))}`];
       } catch {
         return [];
       }
     }));
   }
   if (allItems > DIGEST_ITEMS) lines.push('', t.moreItems(allItems - DIGEST_ITEMS));
+  if (x.escapes && x.escapes.length > 0) {
+    lines.push('', `**${t.escapes}**`, ...x.escapes.map((e) => `- [#${Number(e.number)}](${e.url}) ${safe(e.title)}`));
+  }
   if (x.usage) {
     const cost = x.cost ? `, ${t.cost} ${x.cost.amount} ${x.cost.currency}` : '';
     lines.push('', `${t.usage}: ${t.input} ${x.usage.input}, ${t.cached} ${x.usage.cached}, ${t.output} ${x.usage.output} ${t.tokens}${cost}`);
@@ -597,13 +702,13 @@ export const DIGEST_ITEMS = 20;
 export const MAX_DIGEST = 60000;
 
 /**
- * @param {{ inputId: string, overflow: { label: string, title: string, key: string }[], cap: number, language?: 'en' | 'zh' }} o
+ * @param {{ inputId: string, overflow: { label: string, title: string, key: string }[], cap: number, remaining?: number, language?: 'en' | 'zh' }} o `cap`: the configured max_new_issues_per_run; `remaining`: what was left of it for findings (default all)
  * @returns {string}
  */
 export function renderOverflow(o) {
   return [
     `<!-- square2:overflow:${o.inputId} -->`,
-    L(o.language).overflow(o.overflow.length, o.cap),
+    L(o.language).overflow(o.overflow.length, o.cap, o.remaining ?? o.cap),
     '',
     ...o.overflow.map((f) => {
       let title;

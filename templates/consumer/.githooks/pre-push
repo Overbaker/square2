@@ -7,6 +7,12 @@
 # git passes the remote name and url as arguments and one line per pushed ref on stdin:
 #   <local ref> <local sha> <remote ref> <remote sha>
 cd "$(git rev-parse --show-toplevel)" || exit 1
+# a checkout without square² (an older branch or a linked worktree sharing core.hooksPath): nothing to run
+if [ ! -f tools/square2/bin/square2.mjs ]; then
+  echo "square² not present in this checkout; skipping" >&2
+  cat >/dev/null
+  exit 0
+fi
 remote="${1:-origin}"
 # the remote's default branch (origin/HEAD), for refs the remote does not have yet
 default="$(git symbolic-ref --quiet --short "refs/remotes/$remote/HEAD" 2>/dev/null || true)"

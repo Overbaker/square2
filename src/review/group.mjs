@@ -1,4 +1,6 @@
 import { globMatch } from '../core/exceptions.mjs';
+import { parseTrailers } from '../git/trailers.mjs';
+import { looksSecret } from './render.mjs';
 
 /**
  * @typedef {object} Group
@@ -13,16 +15,46 @@ const ID = '[a-z0-9]+(?:-[a-z0-9]+)+';
 /** Secondary signal: the commit message names `openspec/changes/<id>` or `change <id>` literally. */
 export const CHANGE_ID_PATTERN = new RegExp(`(?:\\bopenspec/changes/(${ID})\\b|\\bchange (${ID})\\b)`);
 const CHANGE_DIR = new RegExp(`^openspec/changes/(?:archive/\\d{4}-\\d{2}-\\d{2}-)?(${ID})/`);
+const TRAILER_ID = /^[a-z0-9]+(?:-[a-z0-9]+){0,15}$/;
 
 /**
- * The openspec change a commit belongs to: the change directory it touches
- * most (`openspec/changes/<id>/**` or `openspec/changes/archive/<date>-<id>/**`),
- * else a literal mention in the message, else null.
- * @param {{ message: string, paths: string[] }} commit
- * @param {RegExp} [pattern]
+ * True for a usable change-id trailer value: lowercase words joined by
+ * single dashes (at most 16), at most 64 characters, not secret-shaped.
+ * Anything else is ignored: never a group id, never printed.
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function validChangeId(value) {
+  return value.length <= 64 && TRAILER_ID.test(value) && !looksSecret(value);
+}
+
+/**
+ * The change id named by the first of the commit's trailers whose key is in
+ * `trailers` (compared case-insensitively) and whose value is a valid change id (validChangeId).
+ * @param {string} message
+ * @param {readonly string[]} trailers
  * @returns {string | null}
  */
-export function changeIdOf(commit, pattern = CHANGE_ID_PATTERN) {
+export function trailerChangeId(message, trailers) {
+  if (trailers.length === 0) return null;
+  const keys = new Set(trailers.map((t) => t.toLowerCase()));
+  for (const t of parseTrailers(message)) if (keys.has(t.key.toLowerCase()) && validChangeId(t.value)) return t.value;
+  return null;
+}
+
+/**
+ * The change a commit belongs to: the value of a configured change-id
+ * trailer; else the openspec change directory it touches most
+ * (`openspec/changes/<id>/**` or `openspec/changes/archive/<date>-<id>/**`);
+ * else a literal mention in the message; else null.
+ * @param {{ message: string, paths: string[] }} commit
+ * @param {RegExp} [pattern]
+ * @param {readonly string[]} [trailers] change-id trailer keys
+ * @returns {string | null}
+ */
+export function changeIdOf(commit, pattern = CHANGE_ID_PATTERN, trailers = []) {
+  const fromTrailer = trailerChangeId(commit.message, trailers);
+  if (fromTrailer) return fromTrailer;
   /** @type {Map<string, number>} */
   const counts = new Map();
   for (const p of commit.paths) {
@@ -35,7 +67,7 @@ export function changeIdOf(commit, pattern = CHANGE_ID_PATTERN) {
 }
 
 /**
- * Group the range's commits: by openspec change id found in the message;
+ * Group the range's commits: by change id (trailer, openspec path or message);
  * else by the first-parent merge that brought the commit in; else one group
  * per commit. Groups touching `riskPaths` come first, then range order.
  * @param {{
@@ -43,6 +75,7 @@ export function changeIdOf(commit, pattern = CHANGE_ID_PATTERN) {
  *   merges: Map<string, string[]>,
  *   riskPaths: string[],
  *   changeIdPattern?: RegExp,
+ *   changeIdTrailers?: readonly string[],
  * }} input `merges` maps each first-parent merge sha to the shas it brought in
  * @returns {Group[]}
  */
@@ -57,7 +90,7 @@ export function groupCommits(input) {
   /** @type {Map<string, Group & { order: number }>} */
   const groups = new Map();
   input.commits.forEach((c, order) => {
-    const change = changeIdOf(c, pattern);
+    const change = changeIdOf(c, pattern, input.changeIdTrailers ?? []);
     /** @type {Group['kind']} */
     let kind = 'commit';
     let id = `commit:${c.sha}`;

@@ -5,7 +5,7 @@
  */
 
 /**
- * @typedef {{ number: number, title: string, body: string, state: 'open' | 'closed', state_reason: string | null, labels: string[], comments: { id: number, body: string, author?: string }[], pull_request?: boolean }} FakeIssue
+ * @typedef {{ number: number, title: string, body: string, state: 'open' | 'closed', state_reason: string | null, labels: string[], comments: { id: number, body: string, author?: string }[], pull_request?: boolean, author?: string }} FakeIssue
  */
 
 export class FakeGitHub {
@@ -73,7 +73,7 @@ export class FakeGitHub {
 
   /** @param {FakeIssue} i */
   view(i) {
-    return { number: i.number, title: i.title, body: i.body, state: i.state, state_reason: i.state_reason, labels: i.labels.map((name) => ({ name })), html_url: `https://github.invalid/${this.repo}/issues/${i.number}`, ...(i.pull_request ? { pull_request: {} } : {}) };
+    return { number: i.number, title: i.title, body: i.body, state: i.state, state_reason: i.state_reason, labels: i.labels.map((name) => ({ name })), html_url: `https://github.invalid/${this.repo}/issues/${i.number}`, user: { login: i.author ?? this.me() }, ...(i.pull_request ? { pull_request: {} } : {}) };
   }
 
   /**

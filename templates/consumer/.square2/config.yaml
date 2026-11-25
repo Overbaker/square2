@@ -39,6 +39,16 @@ max_findings: 10
 max_input_tokens: 200000
 max_calls_per_run: 6
 skip_note: false # true: note on the state issue when nothing fits the input budget
+escapes:
+  enabled: false # experimental escape records (docs/consumer-guide.md); off by default in 0.1.1
+# review: # CONSUMER: only if your commits carry trailers beyond Co-Authored-By
+#   author_trailers: # trailers whose values name the writers (default Co-Authored-By)
+#     - Co-Authored-By
+#     - X-Writers
+#   change_id_trailers: # a commit carrying one joins that change's review group (default none)
+#     - X-Change
+#   provenance_trailers: # further trailers shown on escape records, e.g. your reviewer trailer (default none)
+#     - X-Reviewers
 
 # Minutes budget (warning on the state issue above the pro-rata threshold x 1.2)
 budget:

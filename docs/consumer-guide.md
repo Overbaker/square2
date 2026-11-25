@@ -26,7 +26,42 @@ Copy `templates/consumer/.square2/config.yaml` and fill in every `CONSUMER` line
 - `notify`: logins mentioned once per run digest (nowhere else).
 - `approvers`: who may approve baseline growth.
 - `reviewers`: the review model, by family, provider and deployment. Pick a family different from the
-  one that writes most commits (author families come from `Co-Authored-By` trailers).
+  one that writes most commits (author families come from the author trailers, below).
+- `review.author_trailers`: the commit trailers whose values name the writers (default
+  `[Co-Authored-By]`, keys compared case-insensitively; a value may list several writers separated
+  by commas). The author families are the union over every listed trailer: with
+  `[Co-Authored-By, X-Writers]`, a commit carrying `Co-Authored-By: Claude …` and `X-Writers: codex`
+  has the families `anthropic` and `openai`. The name map: `claude`, `anthropic` → anthropic;
+  `codex`, `gpt*`, `openai` → openai; `gemini`, `antigravity`, `agy` → google. A consistent setup for
+  such commits lists a reviewer of a third family after the primary, both served by the endpoint:
+
+  ```yaml
+  reviewers:
+    - family: openai
+      provider: azure
+      model: gpt-review      # SQ2_REVIEW_MODEL=gpt-review
+    - family: google
+      provider: azure
+      model: gemini-review
+  review:
+    author_trailers:
+      - Co-Authored-By
+      - X-Writers
+  ```
+
+  A range with only anthropic writers is reviewed by `gpt-review`; a range that also has
+  `X-Writers: codex` is reviewed by `gemini-review`. `SQ2_REVIEW_MODEL` and
+  `SQ2_REVIEW_FALLBACK_MODEL` apply only when they name a deployment of the selected reviewer's
+  family; otherwise `review run` ignores them (with a note) and uses the selected reviewer's model, so
+  the variable never forces the primary back in. With only the openai reviewer configured, that range
+  is reviewed same-family and the digest says so.
+- `review.change_id_trailers`: trailers whose value is a change id (default none). A commit carrying
+  one, for example `X-Change: add-cache`, joins the group `change:add-cache` even when it touches no
+  `openspec/changes/<id>/` path. The trailer wins over paths and message mentions. A value counts
+  only if it is lowercase words joined by single dashes (at most 16 words, 64 characters) and does
+  not look like a secret; any other value is ignored, never used as a group id and never shown.
+- `review.provenance_trailers`: further trailers shown on escape records (default none). List your
+  reviewer trailer here, for example `X-Reviewers`, so an escape shows who reviewed the change.
 - `risk_paths`: groups touching these are reviewed first and keep their full diffs when a call must
   be trimmed.
 - `budget`: the monthly minutes target. A run counts as its wall time times its job count; the
@@ -100,7 +135,9 @@ Copy `templates/consumer/.github/workflows/square2-{gate,review}.yml` and
 `CONSUMER` block with the tools your engines need. Activate the hook with
 `git config core.hooksPath .githooks` (or from your package manager's `prepare` script). The hook
 runs `check --rev <pushed commit>` for every pushed ref, in a temporary worktree, so it gates exactly
-what is pushed and writes nothing into the repository.
+what is pushed and writes nothing into the repository. In a checkout without
+`tools/square2/bin/square2.mjs` (an older branch, or a linked worktree sharing `core.hooksPath`) it
+prints `square² not present in this checkout; skipping` and lets the push proceed.
 
 - **Gate**: push to the branch, pull requests to it, and manual dispatch; docs-only changes do not
   start it. The `check` job (`contents: read`) is cancelled by a newer push to the same ref. The
@@ -123,6 +160,55 @@ Two concurrency groups, neither ever cancelled:
 
 So a gate publication never waits for a review, and the state body has a single writer.
 
+### Escape records (experimental, off by default)
+
+Escape records are experimental in v0.1.1 and disabled unless `.square2/config.yaml` sets:
+
+```yaml
+escapes:
+  enabled: true
+```
+
+With the default `false`, `prepare` detects nothing and writes no escape data into its context, and
+`publish` creates, updates and credits nothing for escapes; the digest has no escape section. The
+design is being reworked for v0.1.2 (see [trust-model.md](trust-model.md)). When enabled, the
+daily review's `prepare` step also looks for fix commits in the reviewed range (non-merge
+commits on the branch whose subject matches `^(fix|hotfix|revert)(\(|:|\s)` or the words
+`regression`, `hotfix` or `revert`, or that carry a `Fixes-Commit: <sha>` trailer with a 7 to 40
+character hex sha; any other `Fixes-Commit` value is ignored). This is plain pattern matching; no
+model is called. Commits that touch only paths excluded from the review are ignored. Escapes are
+found even when no group fits the input budget, and are published then too. Pull request reviews
+and `--test` publications record no escapes; their digests still list the open unclassified ones.
+
+`publish` then turns each fix commit into one issue labelled `square2:escape`, keyed by
+`<!-- square2:escape:<fix sha> -->`, so re-runs never duplicate it. The issue records the fix sha,
+the introducing sha (from `Fixes-Commit`, else `unknown`), the changed files, `layer: unclassified`
+and every allow-listed trailer the commit carries: those named in `review.author_trailers`,
+`review.change_id_trailers` and `review.provenance_trailers`, plus `Fixes-Commit`. The subject and
+every trailer value are escaped; a value that looks like a secret anywhere in its full text is shown
+as `<redacted>` (checked before anything is truncated). New escapes count against
+`max_new_issues_per_run` together with the review's findings (escapes first, including those a
+retried run already created); those over the cap are listed in the overflow note on the state
+issue, which shows the configured cap and what remained of it for findings.
+
+A fix that closes a caught finding is not an escape. That needs a GitHub closing keyword (`Closes`,
+`Fixes`, `Resolves` and their forms) followed by `#<n>` with only spaces between them, in prose
+(fenced blocks with any indentation, also inside quotes and list items, indented code, and inline
+code spans of any backtick-run length never count), without an `owner/repo` prefix, where `#<n>` is a `square2:gate` or `square2:review` issue that is
+not a `square2:test` issue and was not closed as not planned or duplicate. That issue gets one
+`credited` comment naming the fix commit. A bare mention (`See #42`) never credits. The decision is
+recorded the first time: an escape issue, or the credit comment. Later runs follow it even if the
+issue's labels or state change. Escapes are found by their marker on any issue square² itself
+opened (the token's login), whatever its labels, so relabelling or classifying one never duplicates
+it (missing `square2` and `square2:escape` labels are added back); a marker in an issue or comment by
+anyone else is ignored, and only square²'s own gate and review issues can be credited. Trailer
+values are allow-listed and redacted before the prepare step writes its context.
+
+Classify an escape by adding one `layer:<name>` label (for example `layer:gate`, `layer:tests`,
+`layer:review` or `layer:human`) and record the follow-up (a rule, a test, review context or a process
+change). square² never sets these labels. Every review digest lists the open escapes without a
+`layer:*` label under "Escapes awaiting classification".
+
 ## 7. Variables and secrets
 
 | Name | Kind | Value |
@@ -130,8 +216,8 @@ So a gate publication never waits for a review, and the state body has a single 
 | `SQ2_GATE_ENABLED` | variable | `true` to run the gate |
 | `SQ2_REVIEW_ENABLED` | variable | `true` to run the scheduled review |
 | `SQ2_AZURE_OPENAI_ENDPOINT` | variable | `https://<resource>.openai.azure.com/` |
-| `SQ2_REVIEW_MODEL` | variable | deployment name of the primary reviewer |
-| `SQ2_REVIEW_FALLBACK_MODEL` | variable | optional second deployment, same family |
+| `SQ2_REVIEW_MODEL` | variable | deployment name of the primary reviewer (used only when its family is the selected reviewer's) |
+| `SQ2_REVIEW_FALLBACK_MODEL` | variable | optional second deployment, same family (same rule) |
 | `SQ2_AZURE_OPENAI_API_KEY` | secret | the Azure OpenAI key (see [auth.md](auth.md)) |
 
 Set the secret from stdin so it never lands in a file or shell history:

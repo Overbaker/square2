@@ -5,8 +5,9 @@ import { sha256Hex } from '../core/fingerprint.mjs';
 import { formatDiagnostic } from '../core/violation.mjs';
 import { GitError } from '../git/exec.mjs';
 import { checkBudget, budgetConfig } from '../issues/budget.mjs';
+import { contextEscapes, publishEscapes } from '../issues/escape.mjs';
 import { GitHubError } from '../issues/github.mjs';
-import { CANDIDATE_LABEL, LABEL, REVIEW_LABEL, parseKey, publish, reviewItems } from '../issues/publish.mjs';
+import { CANDIDATE_LABEL, LABEL, REVIEW_LABEL, TEST_LABEL, gateKey, parseKey, publish, reviewItems } from '../issues/publish.mjs';
 import { StateIssue, advanceState } from '../issues/state.mjs';
 import { evaluateCandidate, parseCandidate, replayVia } from '../review/candidate.mjs';
 import { familyOf } from '../review/family.mjs';
@@ -14,7 +15,7 @@ import { inputId } from '../review/input-id.mjs';
 import { DEFAULT_MAX_FINDINGS, MAX_QUESTIONS } from '../review/validate.mjs';
 import { runGit } from '../git/exec.mjs';
 import { PrepareError, reviewConfig } from '../review/prepare.mjs';
-import { estimateCost, parseTarget, renderCandidateComment, renderStepSummary } from '../review/render.mjs';
+import { estimateCost, parseTarget, renderCandidateComment, renderOverflow, renderStepSummary } from '../review/render.mjs';
 import { resolutionActions } from '../review/resolution.mjs';
 import { RunError, readAnalysis, runReview, writeAnalysis } from '../review/run.mjs';
 import { CommandError, apiGitOps, configuredBranch, github, openRepo, parse, printResult, publishSettings, readJson, stepSummary } from './publish-cmd.mjs';
@@ -414,6 +415,62 @@ export async function candidatesFrom(a) {
 }
 
 /**
+ * The trailer keys escape records may show: the configured author, change-id and provenance trailers.
+ * @param {Record<string, unknown>} raw
+ * @returns {string[]}
+ */
+export function reviewTrailers(raw) {
+  const c = reviewConfig(raw).config;
+  return [...(c.author_trailers ?? []), ...(c.change_id_trailers ?? []), ...(c.provenance_trailers ?? [])];
+}
+
+/**
+ * Escape records are experimental: only with `escapes.enabled: true`.
+ * @param {Record<string, unknown>} raw
+ * @returns {boolean}
+ */
+export function escapesEnabled(raw) {
+  return reviewConfig(raw).config.escapes_enabled === true;
+}
+
+/**
+ * The nonce of a test publication: --nonce, else the workflow run id, else the time.
+ * @param {Record<string, any>} values
+ * @param {Io} io
+ * @returns {string}
+ */
+function testNonce(values, io) {
+  return typeof values.nonce === 'string' && values.nonce !== '' ? values.nonce : io.env.GITHUB_RUN_ID ?? `${(io.now ?? new Date()).getTime()}`;
+}
+
+/**
+ * Escapes of a range prepare skipped for the input budget: still published
+ * (configured branch only, head still containing the range), with the
+ * overflow note on the state issue. Null when not applicable.
+ * @param {{ context: any, repo: any, io: Io, values: Record<string, any> }} a
+ */
+async function skippedEscapes(a) {
+  const { context, repo, io, values } = a;
+  const range = context.range;
+  if (!range || typeof range.branch_or_pr !== 'string' || !range.branch_or_pr.startsWith('branch:') || context.explicit_range === true) return null;
+  const escapes = contextEscapes(context, reviewTrailers(repo.config.raw));
+  if (escapes.length === 0) return null;
+  const gh = github(io, values);
+  const settings = publishSettings(repo.config.raw);
+  const wanted = await configuredBranch(gh, settings.branch);
+  const branch = typeof context.branch === 'string' && context.branch !== '' ? context.branch : values.branch ?? wanted;
+  if (branch !== wanted) return null;
+  const git = io.gitOps ?? apiGitOps(gh);
+  const toSha = String(range.to_sha ?? '').replace(/[^0-9a-f]/g, '');
+  const head = await git.liveHead(repo.root, branch);
+  if (head === null || !(await git.isAncestor(repo.root, toSha, head))) return null;
+  const inputId = `skip-${toSha}`;
+  const esc = await publishEscapes({ gh, escapes, inputId, cap: settings.cap, trailers: reviewTrailers(repo.config.raw), language: settings.language === 'zh' ? 'zh' : 'en' });
+  if (esc.overflow.length > 0) await new StateIssue(gh).commentOnce(`<!-- square2:overflow:${inputId} -->`, renderOverflow({ inputId, overflow: esc.overflow, cap: settings.cap, remaining: Math.max(0, settings.cap - esc.escapesCounted), language: settings.language === 'zh' ? 'zh' : 'en' }));
+  return esc;
+}
+
+/**
  * `square2 review prepare|run|validate|publish|guard-env`
  * @param {string[]} argv
  * @param {Io} io
@@ -438,6 +495,7 @@ export async function reviewCommand(argv, io) {
       head: { type: 'string' },
       from: { type: 'string' },
       to: { type: 'string' },
+      nonce: { type: 'string' },
     });
     const sub = positionals[1];
     if (sub === 'run' && values.help) {
@@ -495,14 +553,23 @@ export async function reviewCommand(argv, io) {
     const paths = contextPaths(resolve(io.cwd, values.context ?? 'square2-review'));
     const context = readJson(paths.file, 'review context');
     if (context && typeof context === 'object' && context.skip === true) {
-      // prepare decided there is nothing to review (empty range, or no group fits the budget): a clean no-op
-      out([`review ${sub}: skipped by prepare (${String(context.reason ?? 'nothing to review')}); nothing published, state unchanged`]);
+      // prepare decided there is nothing to review (empty range, or no group fits the budget): no model findings;
+      // a budget skip still publishes the range's escapes
+      const esc = sub === 'publish' && escapesEnabled(repo.config.raw) && context.skip_kind === 'budget' && io.env.GITHUB_TOKEN && values.test !== true ? await skippedEscapes({ context, repo, io, values }) : null;
+      const reason = String(context.reason ?? 'nothing to review');
+      const escText = esc && (esc.created.length > 0 || esc.credited.length > 0 || esc.overflow.length > 0)
+        ? `escapes: ${esc.created.length} recorded, ${esc.credited.length} credited, ${esc.overflow.length} over the cap`
+        : null;
+      out([escText
+        ? `review ${sub}: skipped by prepare (${reason}); no findings reviewed; ${escText}; state unchanged`
+        : `review ${sub}: skipped by prepare (${reason}); nothing published, state unchanged`]);
       if (sub === 'publish' && context.skip_kind === 'budget' && repo.config.raw.skip_note === true && io.env.GITHUB_TOKEN) {
         const to = String(context.range?.to_sha ?? '');
-        const marker = `<!-- square2:skip:${to.replace(/[^0-9a-f]/g, '')} -->`;
+        const scope = values.test === true ? `:test-${sha256Hex(`skip\0${testNonce(values, io)}`).slice(0, 16)}` : '';
+        const marker = `<!-- square2:skip:${to.replace(/[^0-9a-f]/g, '')}${scope} -->`;
         await new StateIssue(github(io, values)).commentOnce(marker, `${marker}\nsquare² review skipped at \`${to.slice(0, 12).replace(/[^0-9a-f]/g, '')}\`: no group fits the input budget, even with a trimmed diff.\n`);
       }
-      stepSummary(io, renderStepSummary({ status: 'skipped', reason: String(context.reason ?? 'nothing to review') }));
+      stepSummary(io, renderStepSummary({ status: 'skipped', reason: escText ? `${reason}; ${escText}` : reason }));
       return 0;
     }
     const analysis = readAnalysis(resolve(io.cwd, values.analysis ?? 'square2-analysis'), context);
@@ -540,9 +607,23 @@ export async function reviewCommand(argv, io) {
     const toSha = String(review.range.to_sha);
     const state = new StateIssue(gh);
     const git = io.gitOps ?? apiGitOps(gh);
+    // a test publication is scoped to its nonce: its own run id and issue keys, never the production state or escapes
+    const nonce = testRun ? testNonce(values, io) : undefined;
+    const runId = testRun ? sha256Hex(canonicalStringify({ kind: 'review-test', input_id: review.input_id, nonce })) : String(review.input_id);
     let published = false;
-    if ((await state.read()).published_input_ids.includes(review.input_id)) {
+    if (!testRun && (await state.read()).published_input_ids.includes(review.input_id)) {
       out([`review publish: input ${review.input_id.slice(0, 12)} already published; nothing to do`]);
+      // escapes are deduplicated by their per-fix markers only: an input id recorded by an earlier
+      // run that did not publish them (a v0.1.0 test run, a crash) never suppresses them
+      if (!prRun && escapesEnabled(repo.config.raw)) {
+        const head = await git.liveHead(repo.root, branch);
+        if (head !== null && (await git.isAncestor(repo.root, toSha, head))) {
+          const trailers = reviewTrailers(repo.config.raw);
+          const esc = await publishEscapes({ gh, escapes: contextEscapes(context, trailers), inputId: runId, cap: settings.cap, trailers, language: review.language === 'zh' ? 'zh' : 'en' });
+          if (esc.overflow.length > 0) await state.commentOnce(`<!-- square2:overflow:${runId} -->`, renderOverflow({ inputId: runId, overflow: esc.overflow, cap: settings.cap, remaining: Math.max(0, settings.cap - esc.escapesCounted), language: settings.language }));
+          if (esc && (esc.created.length > 0 || esc.credited.length > 0 || esc.overflow.length > 0)) out([`escapes: ${esc.created.length} recorded, ${esc.credited.length} credited, ${esc.overflow.length} over the cap`]);
+        }
+      }
     } else {
       const isPr = typeof review.range.branch_or_pr === 'string' && review.range.branch_or_pr.startsWith('pr:');
       /** @type {string | null} */
@@ -561,17 +642,25 @@ export async function reviewCommand(argv, io) {
           ? `review publish: pull request ${review.range.branch_or_pr.slice(3)} moved to ${head ? head.slice(0, 12) : 'an unknown head'} since ${toSha.slice(0, 12)}; skipped, state not advanced`
           : `review publish: ${toSha.slice(0, 12)} is no longer an ancestor of ${branch} (${head ? head.slice(0, 12) : 'unknown head'}); skipped, state not advanced`]);
       } else {
+        const trailers = reviewTrailers(repo.config.raw);
+        // escape records are experimental and off by default: then nothing is listed, created or credited
+        const esc = escapesEnabled(repo.config.raw)
+          ? await publishEscapes({ gh, escapes: !isPr && !testRun ? contextEscapes(context, trailers) : [], inputId: runId, cap: settings.cap, trailers, language: review.language === 'zh' ? 'zh' : 'en' })
+          : null;
         const cands = await candidatesFrom({ context, analysis, repo, replay: io.replay });
-        const items = reviewItems(review);
+        const found = reviewItems(review);
+        const items = testRun ? Object.assign(found.map((i) => ({ ...i, key: gateKey(i.key, nonce), labels: [...i.labels, TEST_LABEL] })), { rejected: found.rejected }) : found;
         const usage = review.usage && typeof review.usage === 'object' ? review.usage : null;
         const price = priceTable(repo.config.raw);
         const cost = usage && price ? { amount: estimateCost(usage, price), currency: price.currency } : null;
         const res = await publish({
           gh,
           state,
-          run: { kind: 'review', inputId: review.input_id, branch, sha: toSha, language: review.language === 'zh' ? 'zh' : 'en', test: testRun },
+          run: { kind: 'review', inputId: runId, branch, sha: toSha, language: review.language === 'zh' ? 'zh' : 'en', test: testRun },
           items,
-          cap: settings.cap,
+          cap: Math.max(0, settings.cap - (esc?.escapesCounted ?? 0)),
+          configuredCap: settings.cap,
+          overflowFirst: esc?.overflow ?? [],
           notify: settings.notify,
           resolved: derived.resolutions,
           retarget: (Array.isArray(context.open_issues) ? context.open_issues : []).filter((/** @type {any} */ o) => typeof o.renamed_from === 'string' && typeof o.path === 'string' && typeof o.key === 'string').map((/** @type {any} */ o) => ({ key: o.key, path: o.path })),
@@ -587,6 +676,7 @@ export async function reviewCommand(argv, io) {
             sameFamily: review.same_family === true,
             usage,
             cost,
+            ...(esc ? { escapes: esc.unclassified.map((i) => ({ number: i.number, url: i.html_url, title: i.title })) } : {}),
           },
         });
         const explicit = context.explicit_range === true;
@@ -604,9 +694,9 @@ export async function reviewCommand(argv, io) {
           }
         };
         let fresh = await state.reread();
-        let forward = await mayMove(fresh.last_reviewed_sha);
+        let forward = testRun || (await mayMove(fresh.last_reviewed_sha));
         // re-read right before writing; when another run moved the state meanwhile, decide again
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 3 && !testRun; i++) {
           const again = await state.reread();
           if (again.last_reviewed_sha === fresh.last_reviewed_sha) {
             fresh = again;
@@ -616,11 +706,13 @@ export async function reviewCommand(argv, io) {
           forward = await mayMove(fresh.last_reviewed_sha);
         }
         const move = !isPr && !explicit && !testRun && forward;
-        await state.write(advanceState(fresh, { input_id: review.input_id, last_reviewed_sha: move ? toSha : undefined }));
+        if (testRun) err(['note: test publication; the review state is not written']);
+        else await state.write(advanceState(fresh, { input_id: review.input_id, last_reviewed_sha: move ? toSha : undefined }));
         if (!forward) err([`note: state already at ${String(fresh.last_reviewed_sha).slice(0, 12)}, which is not an ancestor of ${toSha.slice(0, 12)}; last_reviewed_sha not moved back`]);
         if (rewritten && move) err([`note: history was rewritten; last_reviewed_sha set to ${toSha.slice(0, 12)}`]);
         if (explicit) err(['note: explicit --from/--to range; last_reviewed_sha not moved']);
         printResult(out, res);
+        if (esc && (esc.created.length > 0 || esc.credited.length > 0 || esc.overflow.length > 0)) out([`escapes: ${esc.created.length} recorded, ${esc.credited.length} credited, ${esc.overflow.length} over the cap, ${esc.unclassified.length} awaiting classification`]);
         for (const [reason, n] of Object.entries(cands.dropped)) out([`candidates dropped (${reason}): ${n}`]);
         stepSummary(io, renderStepSummary({ status: 'ok', published: res.created, demoted: review.demoted.length, duplicates: Number(review.duplicates ?? 0), rejected: items.rejected ?? 0, usage, cost, sameFamily: review.same_family === true }));
         published = true;
@@ -664,6 +756,25 @@ export async function reviewCommand(argv, io) {
 }
 
 /**
+ * A deployment from the environment (SQ2_REVIEW_MODEL, SQ2_REVIEW_FALLBACK_MODEL)
+ * only when it belongs to the selected reviewer's family: when the author
+ * trailers moved the selection to an alternate reviewer, a variable naming
+ * the primary's deployment is ignored (with a note), never forced.
+ * @param {any} context
+ * @param {'SQ2_REVIEW_MODEL' | 'SQ2_REVIEW_FALLBACK_MODEL'} name
+ * @param {Io} io
+ * @returns {string | undefined}
+ */
+export function ownFamilyEnv(context, name, io) {
+  const v = io.env[name];
+  if (typeof v !== 'string' || v === '') return undefined;
+  const family = context?.reviewer?.family;
+  if (typeof family !== 'string' || modelFamily(v, context.reviewers ?? [context.reviewer]) === family) return v;
+  io.stderr(`note: ${name}=${v} is not a ${family} deployment (the selected reviewer); ignored\n`);
+  return undefined;
+}
+
+/**
  * `square2 review run`: the analysis step (no repository, no GitHub credentials).
  * @param {Record<string, string | boolean | undefined>} values
  * @param {Io} io
@@ -685,9 +796,10 @@ async function runCommand(values, io, out) {
   const endpoint = io.env.SQ2_AZURE_OPENAI_ENDPOINT;
   const key = io.env.SQ2_AZURE_OPENAI_API_KEY;
   if (!endpoint || !key) throw new CommandError(formatDiagnostic('S2-REVIEW-MODEL', 'SQ2_AZURE_OPENAI_ENDPOINT and SQ2_AZURE_OPENAI_API_KEY must be set', 'pass the endpoint variable and the key secret to this step only'));
-  const model = (typeof values.model === 'string' && values.model) || io.env.SQ2_REVIEW_MODEL || context.reviewer?.model;
+  const envModel = ownFamilyEnv(context, 'SQ2_REVIEW_MODEL', io);
+  const model = (typeof values.model === 'string' && values.model) || envModel || context.reviewer?.model;
   if (typeof model !== 'string' || model === '') throw new CommandError(formatDiagnostic('S2-REVIEW-MODEL', 'no model deployment', 'pass --model <deployment> or set SQ2_REVIEW_MODEL'));
-  const fallback = (typeof values['fallback-model'] === 'string' && values['fallback-model']) || io.env.SQ2_REVIEW_FALLBACK_MODEL || undefined;
+  const fallback = (typeof values['fallback-model'] === 'string' && values['fallback-model']) || ownFamilyEnv(context, 'SQ2_REVIEW_FALLBACK_MODEL', io) || undefined;
   const allow = values['allow-same-family'] === true;
   for (const m of [model, fallback]) {
     const problem = m ? modelProblem(context, m, allow) : null;

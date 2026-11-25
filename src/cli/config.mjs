@@ -11,12 +11,46 @@ import { errorMessage, parseYaml } from '../core/yaml.mjs';
  * @property {string[]} generated globs excluded from every engine
  * @property {string | null} vendored_path where the repository vendors square² (verification becomes mandatory)
  * @property {{ ruff?: { command?: string[] }, depcruise?: { config?: string }, eslint?: { config?: string } }} engines
+ * @property {{ enabled: boolean }} escapes escape records (`escapes.enabled`, experimental, default false)
  * @property {Record<string, unknown>} raw the whole parsed document (other keys belong to later features)
  */
 
+/** Keys of the `review` map in `.square2/config.yaml`. */
+export const REVIEW_KEYS = Object.freeze(['author_trailers', 'change_id_trailers', 'provenance_trailers']);
+
+/**
+ * The valid `review` key closest to a misspelt one (edit distance).
+ * @param {string} key
+ * @returns {string}
+ */
+export function closestReviewKey(key) {
+  /** @param {string} a @param {string} b */
+  const dist = (a, b) => {
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[b.length];
+  };
+  return [...REVIEW_KEYS].sort((x, y) => dist(key.toLowerCase(), x) - dist(key.toLowerCase(), y))[0];
+}
+
+/**
+ * Problems of the `review` map: not a mapping, or unknown keys.
+ * @param {unknown} review
+ * @returns {{ detail: string, instead: string }[]}
+ */
+export function reviewMapProblems(review) {
+  if (review === undefined || review === null) return [];
+  if (typeof review !== 'object' || Array.isArray(review)) return [{ detail: 'review must be a mapping', instead: `write review as a block map with ${REVIEW_KEYS.join(', ')}` }];
+  return Object.keys(review).filter((k) => !REVIEW_KEYS.includes(k)).sort().map((k) => ({ detail: `unknown setting review.${k}`, instead: `use review.${closestReviewKey(k)}` }));
+}
+
 /** @returns {Config} */
 export function defaultConfig() {
-  return { approvers: [], max_exception_ttl_days: 90, require_provenance: false, generated: [], vendored_path: null, engines: {}, raw: {} };
+  return { approvers: [], max_exception_ttl_days: 90, require_provenance: false, generated: [], vendored_path: null, engines: {}, escapes: { enabled: false }, raw: {} };
 }
 
 /**
@@ -83,6 +117,17 @@ export function parseConfig(text) {
     }
     if (p === null) fail('vendored_path must be a repo-relative path', 'set vendored_path to the directory written by `square2 vendor`, for example tools/square2');
     else config.vendored_path = p;
+  }
+  for (const p of reviewMapProblems(doc.review)) fail(p.detail, p.instead);
+  if (doc.escapes !== undefined && doc.escapes !== null) {
+    const e = doc.escapes;
+    if (typeof e !== 'object' || Array.isArray(e)) fail('escapes must be a mapping', 'write escapes as a block map with enabled: true or false');
+    else {
+      for (const k of Object.keys(e).sort()) if (k !== 'enabled') fail(`unknown setting escapes.${k}`, 'use escapes.enabled');
+      const v = /** @type {Record<string, unknown>} */ (e).enabled;
+      if (v !== undefined && v !== null && typeof v !== 'boolean') fail('escapes.enabled must be true or false', 'set escapes.enabled: false (the default) or true');
+      else config.escapes = { enabled: v === true };
+    }
   }
   if (doc.engines !== undefined && doc.engines !== null) {
     const e = doc.engines;

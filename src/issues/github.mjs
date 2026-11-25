@@ -27,6 +27,7 @@ export class GitHubError extends Error {
  * @property {string | null} state_reason
  * @property {string[]} labels
  * @property {string} html_url
+ * @property {string | null} [author] login of the issue's author
  */
 
 /**
@@ -70,6 +71,7 @@ function toIssue(raw) {
     state_reason: typeof r.state_reason === 'string' ? r.state_reason : null,
     labels: Array.isArray(r.labels) ? r.labels.map((/** @type {any} */ l) => (typeof l === 'string' ? l : l?.name)).filter((/** @type {unknown} */ n) => typeof n === 'string') : [],
     html_url: typeof r.html_url === 'string' ? r.html_url : '',
+    author: typeof r?.user?.login === 'string' ? r.user.login : null,
   };
 }
 

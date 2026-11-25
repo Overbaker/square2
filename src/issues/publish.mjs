@@ -253,6 +253,8 @@ async function commentOnce(gh, cache, number, marker, body) {
  * @property {{ key: string, rule_id: string, body: string, fires_born_from: boolean, fires_parent: boolean }[]} [candidates] rule candidates for closed review issues
  * @property {import('../review/render.mjs').DigestExtras} [extras] review details for the digest
  * @property {{ key: string, path: string }[]} [retarget] open review issues whose file was renamed: their target marker moves to the new path
+ * @property {number} [configuredCap] the configured max_new_issues_per_run when `cap` is what remained of it (shown separately in the overflow note)
+ * @property {{ key: string, title: string, label: string }[]} [overflowFirst] items the caller could not file under the shared cap (escapes), listed first in the overflow note
  */
 
 /**
@@ -287,7 +289,7 @@ export async function publish(input) {
   /** @type {Change[]} */
   const changes = [];
   /** @type {PublishResult['overflow']} */
-  const overflow = [];
+  const overflow = [...(input.overflowFirst ?? [])];
   let created = 0;
   /**
    * @param {Change['action']} action
@@ -437,9 +439,9 @@ export async function publish(input) {
   }
 
   if (overflow.length > 0) {
-    await input.state.commentOnce(`<!-- square2:overflow:${run.inputId} -->`, renderOverflow({ inputId: run.inputId, overflow, cap, language: run.language }));
+    await input.state.commentOnce(`<!-- square2:overflow:${run.inputId} -->`, renderOverflow({ inputId: run.inputId, overflow, cap: input.configuredCap ?? cap, remaining: cap, language: run.language }));
   }
-  const asks = (input.extras?.questions?.length ?? 0) + (input.extras?.suggestions?.length ?? 0) + (input.extras?.notes?.length ?? 0);
+  const asks = (input.extras?.questions?.length ?? 0) + (input.extras?.suggestions?.length ?? 0) + (input.extras?.notes?.length ?? 0) + (input.extras?.escapes?.length ?? 0);
   const wantDigest = run.kind === 'gate' ? changes.some((c) => c.action === 'created' || c.action === 'reopened') : changes.length > 0 || asks > 0;
   let digest = false;
   if (wantDigest) {
