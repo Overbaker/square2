@@ -1,12 +1,34 @@
-# square² (方方)
+<p align="center">
+  <img src="docs/images/hero-banner.svg" alt="square² (方方) — Zero-dependency repo governance: ratcheting deterministic gates + advisory cross-family AI review" width="100%" />
+</p>
 
-square² is a repo-agnostic skeleton with two planes. The **deterministic gate** runs a validated rule catalogue through engine adapters, subtracts a ratcheting baseline and expiring exceptions, and fails only on new violations, each printed with the fix (`Instead:`). The **advisory cross-family review** has a model from a different family than the code's authors review new commits and publish findings as issues; it never blocks anything.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F59E0B" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/badge/Node-%E2%89%A5%2022-10B981" alt="Node >= 22" />
+  <img src="https://img.shields.io/badge/Runtime%20Deps-0-8B5CF6" alt="Zero Runtime Dependencies" />
+  <img src="https://img.shields.io/badge/Status-v0.1%20Advisory-334155" alt="Status: v0.1 Advisory" />
+</p>
 
-Status: v0.1 in progress. Both planes are advisory: square² reports and opens issues; it does not block merges.
+<p align="center">
+  <a href="docs/consumer-guide.md"><strong>Consumer Guide</strong></a> ·
+  <a href="docs/dune-rules.md"><strong>Gate Rules</strong></a> ·
+  <a href="docs/trust-model.md"><strong>Trust Model</strong></a> ·
+  <a href="docs/auth.md"><strong>Auth</strong></a> ·
+  <a href="templates/consumer/"><strong>Templates</strong></a> ·
+  <a href="https://github.com/Overbaker/square2/discussions"><strong>Discussions</strong></a>
+</p>
 
-Docs: [gate rules](docs/dune-rules.md) · [consumer guide](docs/consumer-guide.md) · [trust model](docs/trust-model.md) · [auth](docs/auth.md). Templates for a consumer repository (workflows, `.square2/`, pre-push hook) are in [`templates/consumer/`](templates/consumer/).
+---
 
-Zero runtime dependencies. Requires Node >= 22.
+**square² (方方)** is a **zero-dependency**, repo-agnostic governance skeleton (Node ≥ 22, MIT) built around two non-blocking planes: a **deterministic ratcheting quality gate** that fails only on *new* regressions with concrete `Instead:` fixes, and an **advisory cross-family AI code review** where a different model family audits commits in a credential-isolated read-only copy.
+
+## Two-Plane Architecture
+
+<p align="center">
+  <img src="docs/images/two-planes.svg" alt="square2 two-plane architecture: deterministic ratcheting gate and 3-stage cross-family AI review" width="100%" />
+</p>
+
+## Quick Start
 
 ```sh
 npm install
@@ -14,48 +36,38 @@ npm run typecheck
 npm test
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same plus an agnosticism grep whose word list is the
-repository secret `SQ2_FORBIDDEN_PATTERN` (an extended regex, masked in logs), so the public
-repository never names a consumer. Without the secret (forks) that step is skipped.
+Drop-in consumer workflows, `.square2/` configs, and pre-push hooks live in [`templates/consumer/`](templates/consumer/).
 
-License: MIT.
+## CLI Commands
 
-## Commands
+Run from your repo root (or pass `--root <dir>`). Exit codes: `0` pass · `1` violations · `2` tool/config/vendor error.
 
-Run from the repository root (or pass `--root <dir>`). Exit codes: `0` pass, `1` violations, `2` square² could not run (catalogue, self-test, engine, vendor or usage error).
-
-| Command | What it does |
+| Command | Purpose |
 |---|---|
-| `square2 check [--only <ids>] [--format text\|github] [--report <path>] [--base <sha>] [--rev <sha>]` | Self-test, then run every enabled rule, subtract `.square2/baseline.json` and live exceptions, and print `[ID] path:line message — Instead: …` lines. `--report <path>` writes the JSON report (nothing is written without it). With `--base`, also enforce the baseline ratchet and exception immutability against that commit (all-zero sha = no previous commit; an unknown sha exits 2). With `--rev`, gate that commit's tree in a temporary worktree instead of the working tree (the pre-push hook uses this). |
-| `square2 config get <key>` | Print one scalar of `.square2/config.yaml` (exit 1 when unset); the review workflow reads `branch` with it. |
-| `square2 selftest [--only <ids>]` | Every enabled rule must fire on `.square2/fixtures/<id>/bad/` and stay silent on `good/`. |
-| `square2 baseline show \| shrink \| grow --approval <id>` | Inspect, shrink (drop entries no longer observed), or grow (cite an entry of `.square2/approvals.yaml`) the baseline. |
-| `square2 exceptions lint [--base <sha>]` | Validate `.square2/exceptions.yaml`. |
-| `square2 vendor --from <path\|git-url> --ref <tag> [--into <dir>]` | Copy square² into `tools/square2/` and pin it in `.square2/lock.json`; the vendored runner refuses to run if its tree changes. |
-| `square2 replay --rule <id> (--commit <sha> \| --since <days>) [--out <file>]` | Run one rule on history in a temporary worktree: does it fire newly on `<sha>` and not on its parent; or which commits in the window it fires on (with `grade: null` per firing). |
-| `square2 review prepare \| run \| validate \| publish \| guard-env` | The daily review in three steps with separate credentials: `prepare` (context and tree archive), `run` (codex on a read-only copy, no GitHub token), `publish` (validated findings as issues, state). See [docs/consumer-guide.md](docs/consumer-guide.md). |
-| `square2 publish-gate [--report <path>] [--branch <name>] [--test]` | Publish new gate violations as issues (configured branch only, unless `--test`). |
-| `square2 budget` | Month-to-date Actions minutes of the square² workflows; warns on the state issue over the threshold. |
+| `square2 check [--only <ids>] [--format text\|github] [--report <path>] [--base <sha>] [--rev <sha>]` | Self-test enabled rules, subtract `.square2/baseline.json` + live exceptions, print `[ID] path:line — Instead: …`. Enforces baseline ratchet & exception immutability with `--base`. |
+| `square2 selftest [--only <ids>]` | Verify every enabled rule fires on `.square2/fixtures/<id>/bad/` and stays silent on `good/`. |
+| `square2 baseline show \| shrink \| grow --approval <id>` | Inspect, shrink resolved entries, or grow baseline citing `.square2/approvals.yaml`. |
+| `square2 exceptions lint [--base <sha>]` | Validate `.square2/exceptions.yaml` TTLs and immutability. |
+| `square2 vendor --from <path\|git-url> --ref <tag> [--into <dir>]` | Copy square² into `tools/square2/` and pin `tree_sha256` in `.square2/lock.json`. |
+| `square2 replay --rule <id> (--commit <sha> \| --since <days>) [--out <file>]` | Replay a candidate rule on git history in a temporary worktree before enabling it. |
+| `square2 review prepare \| run \| validate \| publish \| guard-env` | 3-stage daily cross-family review (`prepare` → read-only `run` with no GH token → `validate`/`publish`). |
+| `square2 publish-gate [--report <path>] [--branch <name>] [--test]` | Open GitHub issues for new gate violations on the configured branch. |
+| `square2 budget` | Track month-to-date Actions minutes against your threshold. |
+| `square2 config get <key>` | Print a scalar from `.square2/config.yaml`. |
 
-`<ids>` is a comma-separated list of id globs such as `S2-DEP-*,S2-SUPPRESS-*`. `--square2-dir <dir>` (or `SQUARE2_DIR`) reads the catalogue from another directory.
-
-## Configuration (`.square2/config.yaml`)
+<details>
+<summary><strong>Configuration (<code>.square2/config.yaml</code>) & Pluggable Engines</strong></summary>
 
 ```yaml
 approvers:
   - some-login
 max_exception_ttl_days: 90
-require_provenance: false   # true: every enabled rule needs born_from and a replay report
+require_provenance: false   # true: every enabled rule needs born_from + replay report
 generated:
   - apps/web/generated/**
 engines:
   ruff:
-    command:                # block list; e.g. a workspace venv or uv
-      - uv
-      - run
-      - --project
-      - python
-      - ruff
+    command: [uv, run, --project, python, ruff]
   depcruise:
     config: .dependency-cruiser.cjs
   eslint:
@@ -76,6 +88,8 @@ Escape records (experimental, off by default; `escapes.enabled: true`): fix comm
 
 Engines: `depcruise` and `eslint` run the repository's own installed tools; `ruff` runs the configured command; `suppressions` is built in; `command` runs `options.argv` (with `{root}` replaced by the tree to scan) and reads one JSON object per line: `{"path": "src/a.ts", "line": 3, "subject": "what is wrong"}`.
 
+</details>
+
 ## Changes
 
 - **0.1.1**: configurable author, change-id and provenance trailers (`review.*_trailers`); commit
@@ -87,6 +101,24 @@ Engines: `depcruise` and `eslint` run the repository's own installed tools; `ruf
 
 ## Vendoring
 
-`square2 vendor` copies square² into the repository and pins the copy in `.square2/lock.json`. Verification is mandatory as soon as `.square2/config.yaml` declares `vendored_path`, a lock exists, or the running copy carries the `.square2-vendored` marker: the lock's `path` must be a plain repo-relative path and the tree there must hash to `tree_sha256`, else every command exits 2 with `[S2-VENDOR-TAMPERED]`.
+<details>
+<summary><strong>Tamper-Evident Vendoring & CI Agnosticism</strong></summary>
 
-Threat model: detects accidental edits of the vendored copy; a committer can always change policy, which review of the commit must catch.
+- **Vendoring**: `square2 vendor` pins `tree_sha256` in `.square2/lock.json`. Any unexpected modification exits `2` with `[S2-VENDOR-TAMPERED]`.
+  Threat model: detects accidental edits of the vendored copy; a committer can always change policy, which review of the commit must catch.
+- **CI Agnosticism**: `.github/workflows/ci.yml` runs `typecheck`, `test`, and an optional agnosticism grep using `SQ2_FORBIDDEN_PATTERN` (skipped on forks) so the public skeleton never leaks consumer names.
+
+</details>
+
+<details>
+<summary><strong>FAQ</strong></summary>
+
+- **Does square² block PR merges?** Both planes are advisory by default (`v0.1`): square² reports violations and opens issues without blocking merges.
+- **Why split AI review into 3 steps?** Keeping `review run` strictly read-only with **zero GitHub token** ensures an untrusted model call cannot mutate repository state or exfiltrate write credentials.
+- **Why zero runtime dependencies?** Vendoring square² into `tools/square2/` stays fast, auditable, and immune to supply-chain churn.
+
+</details>
+
+---
+
+Licensed under **MIT** ([LICENSE](LICENSE)). See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute.

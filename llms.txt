@@ -1,0 +1,28 @@
+# square² / 方方 (Overbaker/square2)
+
+> Zero-dependency, repo-agnostic governance skeleton (Node.js ≥ 22, MIT) combining a **deterministic ratcheting quality gate** with **credential-isolated advisory cross-family AI code review**.
+
+## Two Planes
+
+1. **Plane 1 — Deterministic Ratcheting Gate (`square2 check`)**:
+   - Self-tests every enabled rule against `.square2/fixtures/<id>/good/` and `bad/` before scanning.
+   - Runs pluggable engine adapters (`eslint`, `ruff`, `depcruise`, built-in `suppressions`, or custom JSON-lines `command`).
+   - Subtracts `.square2/baseline.json` and expiring `.square2/exceptions.yaml` (enforcing baseline ratchet & exception immutability against `--base <sha>`), reporting only new regressions with actionable `Instead:` fixes.
+2. **Plane 2 — Advisory Cross-Family AI Review (`square2 review`)**:
+   - Splits daily AI commit review into 3 credential-isolated steps: `prepare` (diff context + read-only archive), `run` (a model from a different family reviews a read-only copy with **no GitHub token**), and `validate` / `publish` (schema-validated non-blocking GitHub issues).
+   - Advisory by design: never blocks merges.
+
+## Security & Portability
+
+- **Zero Runtime Dependencies**: Plain Node.js ≥ 22 ES modules.
+- **Tamper-Evident Vendoring (`square2 vendor`)**: Copies square² into `tools/square2/` and pins `tree_sha256` in `.square2/lock.json`; exits `2` with `[S2-VENDOR-TAMPERED]` on unexpected edits.
+- **History Replay (`square2 replay`)**: Test any candidate rule against historical commits in a temporary worktree before enabling it.
+
+## Links
+
+- [Repository & README](https://github.com/Overbaker/square2)
+- [Consumer Guide](https://github.com/Overbaker/square2/blob/main/docs/consumer-guide.md)
+- [Trust Model](https://github.com/Overbaker/square2/blob/main/docs/trust-model.md)
+- [Gate Rules](https://github.com/Overbaker/square2/blob/main/docs/dune-rules.md)
+- [Contributing](https://github.com/Overbaker/square2/blob/main/CONTRIBUTING.md)
+- [Discussions](https://github.com/Overbaker/square2/discussions)
